@@ -3,10 +3,11 @@ from shiny import App, ui
 
 from pages.get_ngram_data import get_ngram_data_ui, get_ngram_data_server
 from pages.explorer import explorer_ui, explorer_server
-from pages.auc_lab import auc_lab_ui, auc_lab_server
 from pages.cross_corpus import cross_corpus_ui, cross_corpus_server
 from pages.synonyms_explorer import synonyms_explorer_ui, synonyms_explorer_server
 from pages.inflections_explorer import inflections_explorer_ui, inflections_explorer_server
+from pages.compare_english_corpora import get_compare_english_corpora_ui, get_compare_english_corpora_server
+
 
 
 app_ui = ui.page_fluid(
@@ -95,7 +96,12 @@ app_ui = ui.page_fluid(
     ui.navset_tab(
         ui.nav_panel("Ngram Data Fetcher", get_ngram_data_ui()),
         ui.nav_panel("Explorer", explorer_ui()),
-        ui.nav_panel("AUC Lab", auc_lab_ui()),
+
+        ui.nav_panel(
+            "Compare Corpora",
+            get_compare_english_corpora_ui()
+        ),
+
         ui.nav_panel("Cross-Corpus Analysis", cross_corpus_ui()),
         ui.nav_panel("Synonyms Explorer", synonyms_explorer_ui()),
         ui.nav_panel("Inflections Explorer", inflections_explorer_ui()),
@@ -112,7 +118,13 @@ def server(input_, output, session):
 
     get_ngram_data_server(input_, output, session, shared)
     explorer_server(input_, output, session, shared)
-    auc_lab_server(input_, output, session, shared)
+    get_compare_english_corpora_server(
+        input_,
+        output,
+        session,
+        shared
+    )
+
     cross_corpus_server(input_, output, session, shared)
     synonyms_explorer_server(input_, output, session, shared)
     inflections_explorer_server(input_, output, session, shared)

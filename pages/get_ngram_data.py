@@ -137,7 +137,8 @@ def get_ngram_data_ui():
 
         ui.p(
             "Enter words manually or upload a TXT/Excel file. "
-            "The app downloads raw relative frequencies from Google Ngram. ",
+            "The app downloads raw relative frequencies from Google Ngram. "
+            "Optionally, values can be converted to words per million.",
             class_="muted"
         ),
 
@@ -175,6 +176,12 @@ def get_ngram_data_ui():
                 ui.input_numeric("smoothing", "Smoothing", value=0, min=0, max=50),
                 ui.input_checkbox("case_insensitive", "Case insensitive", value=False),
 
+                ui.input_checkbox(
+                    "convert_to_pmw",
+                    "Convert to words per million (PMW)",
+                    value=True
+                ),
+
                 ui.input_action_button(
                     "download_ngram",
                     "Fetch Ngram data",
@@ -200,6 +207,7 @@ def get_ngram_data_server(input, output, session, shared):
 
     ngram_df = reactive.Value(None)
     status_text = reactive.Value("No data fetched yet.")
+    scale_text = reactive.Value("raw relative frequency")
 
     def collect_words():
         words = []
@@ -240,6 +248,15 @@ def get_ngram_data_server(input, output, session, shared):
         corpus = int(input.corpus())
         smoothing = int(input.smoothing())
         case_insensitive = bool(input.case_insensitive())
+        convert_to_pmw = bool(input.convert_to_pmw())
+
+        scale = (
+            "words per million (PMW)"
+            if convert_to_pmw
+            else "raw relative frequency"
+        )
+
+        scale_text.set(scale)
 
         years = list(range(year_start, year_end + 1))
         rows = []
@@ -265,8 +282,14 @@ def get_ngram_data_server(input, output, session, shared):
                 ts = (ts + [0.0] * expected_len)[:expected_len]
 
                 row = {"word": word}
+
                 for y, value in zip(years, ts):
-                    row[str(y)] = float(value)
+                    value = float(value)
+
+                    if convert_to_pmw:
+                        value = value * 1_000_000
+
+                    row[str(y)] = value
 
                 rows.append(row)
 
@@ -286,6 +309,7 @@ def get_ngram_data_server(input, output, session, shared):
 
         shared["uploaded_df"] = df
         shared["uploaded_years"] = years
+        shared["uploaded_scale"] = scale
 
         choices = sorted(df["word"].dropna().unique().tolist())
 
@@ -300,7 +324,7 @@ def get_ngram_data_server(input, output, session, shared):
 
         status_text.set(
             f"Downloaded {len(df)} words for years {year_start}–{year_end}. "
-            "Values are raw relative frequencies from Google Ngram."
+            f"Values are {scale}."
         )
 
     @output
@@ -342,7 +366,11 @@ def get_ngram_data_server(input, output, session, shared):
 
     @output
     @render.download(
-        filename=lambda: "ngram_raw_relative_frequencies.xlsx"
+        filename=lambda: (
+            "ngram_words_per_million.xlsx"
+            if bool(input.convert_to_pmw())
+            else "ngram_raw_relative_frequencies.xlsx"
+        )
     )
     def download_ngram_xlsx():
         df = ngram_df.get()
@@ -355,8 +383,22 @@ def get_ngram_data_server(input, output, session, shared):
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             path = tmp.name
 
+        convert_to_pmw = bool(input.convert_to_pmw())
+
+        scale = (
+            "words per million (PMW)"
+            if convert_to_pmw
+            else "raw relative frequency"
+        )
+
+        note = (
+            "PMW = raw relative frequency * 1,000,000"
+            if convert_to_pmw
+            else "Raw relative frequency returned by Google Ngram"
+        )
+
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="ngram_raw")
+            df.to_excel(writer, index=False, sheet_name="ngram_data")
 
             meta = pd.DataFrame({
                 "setting": [
@@ -369,7 +411,8 @@ def get_ngram_data_server(input, output, session, shared):
                     "year_end",
                 ],
                 "value": [
-                    "raw relative frequency",
+                    scale,
+                    note,
                     input.corpus(),
                     input.smoothing(),
                     input.case_insensitive(),
