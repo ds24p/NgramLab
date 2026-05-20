@@ -16,7 +16,6 @@ def fetch_ngram_timeseries(
     year_start: int,
     year_end: int,
     corpus: int,
-    smoothing: int = 0,
     case_insensitive: bool = False,
     timeout: int = 30,
 ):
@@ -25,7 +24,7 @@ def fetch_ngram_timeseries(
         "year_start": str(year_start),
         "year_end": str(year_end),
         "corpus": str(corpus),
-        "smoothing": str(smoothing),
+        "smoothing": "0",
     }
 
     if case_insensitive:
@@ -133,6 +132,133 @@ def unique_words(words):
 
 def get_ngram_data_ui():
     return ui.div(
+        ui.tags.style(
+            """
+        .ngram-section-card {
+            background: #ffffff;
+            border-radius: 22px;
+            padding: 24px;
+            margin-bottom: 20px;
+            border: 1px solid #e7e0d8;
+            box-shadow: 0 10px 30px rgba(30, 20, 10, 0.04);
+        }
+
+        .ngram-layout-card {
+            background: #ffffff;
+            border-radius: 22px;
+            padding: 22px;
+            border: 1px solid #e7e0d8;
+            box-shadow: 0 10px 30px rgba(30, 20, 10, 0.04);
+        }
+
+        .ngram-inner-card {
+            background: #fbfaf8;
+            border-radius: 18px;
+            padding: 16px;
+            margin-bottom: 16px;
+            border: 1px solid #ebe3da;
+            box-shadow: 0 2px 8px rgba(30, 20, 10, 0.03);
+        }
+
+        .ngram-results-card {
+            background: #fbfaf8;
+            border-radius: 18px;
+            padding: 18px;
+            border: 1px solid #ebe3da;
+        }
+
+        .ngram-section-card .page-title {
+            margin-bottom: 8px;
+        }
+
+        .ngram-section-card .muted {
+            margin-bottom: 0;
+        }
+
+        /* inputs */
+        .ngram-inner-card input,
+        .ngram-inner-card select,
+        .ngram-inner-card textarea {
+            border: 1px solid #d1d5db !important;
+            border-radius: 7px !important;
+            box-shadow: none !important;
+        }
+
+        .ngram-inner-card input:focus,
+        .ngram-inner-card select:focus,
+        .ngram-inner-card textarea:focus {
+            border-color: #7c3aed !important;
+            box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.22) !important;
+        }
+
+        /* checkbox purple */
+        .ngram-inner-card input[type="checkbox"],
+        .form-check-input {
+            accent-color: #6d28d9 !important;
+        }
+
+        .form-check-input:checked {
+            background-color: #6d28d9 !important;
+            border-color: #6d28d9 !important;
+        }
+
+        /* buttons */
+        #download_ngram,
+        #download_ngram_xlsx {
+            width: 100% !important;
+            height: 46px !important;
+            border-radius: 7px !important;
+            font-size: 14px !important;
+            font-weight: 500 !important;
+            line-height: 1 !important;
+            white-space: nowrap !important;
+            text-align: center !important;
+
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+
+            padding: 0 12px !important;
+            transition: all 0.2s ease;
+        }
+
+        /* purple fetch button */
+        #download_ngram {
+            margin-top: 12px;
+            margin-bottom: 12px;
+            background: #6d28d9 !important;
+            border: 1px solid #6d28d9 !important;
+            color: white !important;
+        }
+
+        #download_ngram:hover {
+            background: #5b21b6 !important;
+            border-color: #5b21b6 !important;
+        }
+
+        /* download button */
+        #download_ngram_xlsx {
+            background: white !important;
+            border: 1.4px solid #111111 !important;
+            color: #111111 !important;
+        }
+
+        #download_ngram_xlsx:hover {
+            background: #111111 !important;
+            color: white !important;
+            border-color: #111111 !important;
+        }
+
+        /* remove weird link/button underline */
+        #download_ngram_xlsx,
+        #download_ngram_xlsx:hover {
+            text-decoration: none !important;
+        }
+            """
+        ),
+
+    ui.div(
+
         ui.div("Get Ngram Data", class_="page-title"),
 
         ui.p(
@@ -143,64 +269,96 @@ def get_ngram_data_ui():
         ),
 
         ui.layout_sidebar(
+
             ui.sidebar(
-                ui.input_text_area(
-                    "manual_words",
-                    "Type words manually",
-                    placeholder="Example:\nlove\nwar\nfreedom",
-                    rows=6
+
+                ui.div(
+                    ui.input_text_area(
+                        "manual_words",
+                        "Type words manually",
+                        placeholder="One word per line\nlove\nwar\nfreedom",
+                        rows=6
+                    ),
+                    class_="inner-card"
                 ),
 
-                ui.input_file(
-                    "word_file",
-                    "Or upload TXT / Excel file with words",
-                    accept=[".txt", ".xlsx", ".xls"],
-                    multiple=False
+                ui.div(
+                    ui.input_file(
+                        "word_file",
+                        "Or upload TXT / Excel file with words",
+                        accept=[".txt", ".xlsx", ".xls"],
+                        multiple=False
+                    ),
+                    class_="inner-card"
                 ),
 
-                ui.input_numeric("year_start", "Start year", value=1901, min=1500, max=2019),
-                ui.input_numeric("year_end", "End year", value=2000, min=1500, max=2019),
+                ui.div(
 
-                ui.input_select(
-                    "corpus",
-                    "Corpus",
-                    choices={
-                        "26": "English 2019",
-                        "27": "American English 2019",
-                        "28": "British English 2019",
-                        "29": "English Fiction 2019",
-                    },
-                    selected="26"
-                ),
+                    ui.input_numeric(
+                        "year_start",
+                        "Start year",
+                        value=1901,
+                        min=1500,
+                        max=2019
+                    ),
 
-                ui.input_numeric("smoothing", "Smoothing", value=0, min=0, max=50),
-                ui.input_checkbox("case_insensitive", "Case insensitive", value=False),
+                    ui.input_numeric(
+                        "year_end",
+                        "End year",
+                        value=2000,
+                        min=1500,
+                        max=2019
+                    ),
 
-                ui.input_checkbox(
-                    "convert_to_pmw",
-                    "Convert to words per million (PMW)",
-                    value=True
-                ),
+                    ui.input_select(
+                        "corpus",
+                        "Corpus",
+                        choices={
+                            "26": "English 2019",
+                            "27": "American English 2019",
+                            "28": "British English 2019",
+                            "29": "English Fiction 2019",
+                        },
+                        selected="26"
+                    ),
 
-                ui.input_action_button(
-                    "download_ngram",
-                    "Fetch Ngram data",
-                    class_="btn-primary"
-                ),
+                    ui.input_checkbox(
+                        "case_insensitive",
+                        "Case insensitive",
+                        value=False
+                    ),
 
-                ui.download_button(
-                    "download_ngram_xlsx",
-                    "Download Excel file"
+                    ui.input_checkbox(
+                        "convert_to_pmw",
+                        "Convert to words per million (PMW)",
+                        value=True
+                    ),
+
+                    ui.input_action_button(
+                        "download_ngram",
+                        "Fetch Ngram data",
+                        class_="btn-primary"
+                    ),
+
+                    ui.download_button(
+                        "download_ngram_xlsx",
+                        "Download Excel file"
+                    ),
+
+                    class_="inner-card"
                 ),
             ),
 
             ui.div(
                 ui.output_text("ngram_status"),
                 ui.output_data_frame("ngram_table"),
-                class_="card"
-            )
-        )
+                class_="results-card"
+            ),
+        ),
+
+        class_="card section-card"
     )
+)
 
 
 def get_ngram_data_server(input, output, session, shared):
@@ -246,7 +404,6 @@ def get_ngram_data_server(input, output, session, shared):
             return
 
         corpus = int(input.corpus())
-        smoothing = int(input.smoothing())
         case_insensitive = bool(input.case_insensitive())
         convert_to_pmw = bool(input.convert_to_pmw())
 
@@ -270,7 +427,6 @@ def get_ngram_data_server(input, output, session, shared):
                     year_start=year_start,
                     year_end=year_end,
                     corpus=corpus,
-                    smoothing=smoothing,
                     case_insensitive=case_insensitive,
                 )
 
@@ -304,6 +460,9 @@ def get_ngram_data_server(input, output, session, shared):
                 print(f"Error for {word}: {e}")
 
         df = pd.DataFrame(rows)
+
+        numeric_cols = df.select_dtypes(include="number").columns
+        df[numeric_cols] = df[numeric_cols].round(2)
 
         ngram_df.set(df)
 
@@ -397,15 +556,18 @@ def get_ngram_data_server(input, output, session, shared):
             else "Raw relative frequency returned by Google Ngram"
         )
 
+        export_df = df.copy()
+        numeric_cols = export_df.select_dtypes(include="number").columns
+        export_df[numeric_cols] = export_df[numeric_cols].round(2)
+
         with pd.ExcelWriter(path, engine="openpyxl") as writer:
-            df.to_excel(writer, index=False, sheet_name="ngram_data")
+            export_df.to_excel(writer, index=False, sheet_name="ngram_data")
 
             meta = pd.DataFrame({
                 "setting": [
                     "scale",
                     "note",
                     "corpus",
-                    "smoothing",
                     "case_insensitive",
                     "year_start",
                     "year_end",
@@ -414,7 +576,6 @@ def get_ngram_data_server(input, output, session, shared):
                     scale,
                     note,
                     input.corpus(),
-                    input.smoothing(),
                     input.case_insensitive(),
                     input.year_start(),
                     input.year_end(),

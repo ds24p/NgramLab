@@ -70,6 +70,21 @@ Within a particular ecosystem, there may be a common way of installing things, s
 ## Usage
 Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
+## Run
+On Windows you can use the bundled scripts which call the `python` on your PATH. Open PowerShell or CMD in the project root and run:
+
+```powershell
+./run_app.ps1
+# or
+./run_app.bat
+```
+
+Alternatively run directly with the active Python:
+
+```powershell
+python -m shiny run --port 50817 --reload --autoreload-port 50818 app.py
+```
+
 ## Support
 Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
 
