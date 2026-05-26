@@ -82,7 +82,15 @@ On Windows you can use the bundled scripts which call the `python` on your PATH.
 Alternatively run directly with the active Python:
 
 ```powershell
-python -m shiny run --port 50817 --reload --autoreload-port 50818 app.py
+python app.py
+```
+
+This will start the app on `http://127.0.0.1:50817`.
+
+Or use the Shiny CLI directly:
+
+```powershell
+python -m shiny run --port 50817 app.py
 ```
 
 ## Support

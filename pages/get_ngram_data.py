@@ -1,76 +1,12 @@
 from shiny import reactive, render, ui
 import pandas as pd
-import urllib.parse
-import urllib.request
-import urllib.error
-import json
 import time
-import random
+
+from utils import fetch_ngram_timeseries, parse_manual_words, unique_words
 
 
 POLITE_DELAY_SEC = 0.4
-
-
-def fetch_ngram_timeseries(
-    word: str,
-    year_start: int,
-    year_end: int,
-    corpus: int,
-    case_insensitive: bool = False,
-    timeout: int = 30,
-):
-    params = {
-        "content": word,
-        "year_start": str(year_start),
-        "year_end": str(year_end),
-        "corpus": str(corpus),
-        "smoothing": "0",
-    }
-
-    if case_insensitive:
-        params["case_insensitive"] = "on"
-
-    url = "https://books.google.com/ngrams/json?" + urllib.parse.urlencode(params)
-
-    max_retries = 6
-    backoff_base = 1.0
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode("utf-8")
-
-            data = json.loads(raw)
-
-            if not data:
-                return []
-
-            ts = data[0].get("timeseries", [])
-
-            if not isinstance(ts, list):
-                return []
-
-            return ts
-
-        except urllib.error.HTTPError as he:
-            if he.code == 429:
-                wait = backoff_base * (2 ** (attempt - 1)) + random.uniform(0.1, 0.5)
-                time.sleep(wait)
-                continue
-            raise
-
-        except urllib.error.URLError:
-            wait = backoff_base * (2 ** (attempt - 1)) + random.uniform(0.1, 0.5)
-            time.sleep(wait)
-            continue
-
-    raise RuntimeError(f"Failed to fetch data for '{word}'.")
-
+REFERENCE_WORD = "the"
 
 def read_words_from_txt(path: str):
     words = []
@@ -98,174 +34,29 @@ def read_words_from_excel(path: str):
 
     return unique_words(words)
 
-
-def parse_manual_words(text: str):
-    if not text:
-        return []
-
-    raw_words = []
-
-    for line in text.replace(",", "\n").splitlines():
-        word = line.strip()
-        if word:
-            raw_words.append(word)
-
-    return unique_words(raw_words)
-
-
-def unique_words(words):
-    out = []
-    seen = set()
-
-    for w in words:
-        w = str(w).strip()
-        if not w:
-            continue
-
-        key = w.lower()
-        if key not in seen:
-            seen.add(key)
-            out.append(w)
-
-    return out
-
-
 def get_ngram_data_ui():
     return ui.div(
-        ui.tags.style(
-            """
-        .ngram-section-card {
-            background: #ffffff;
-            border-radius: 22px;
-            padding: 24px;
-            margin-bottom: 20px;
-            border: 1px solid #e7e0d8;
-            box-shadow: 0 10px 30px rgba(30, 20, 10, 0.04);
-        }
-
-        .ngram-layout-card {
-            background: #ffffff;
-            border-radius: 22px;
-            padding: 22px;
-            border: 1px solid #e7e0d8;
-            box-shadow: 0 10px 30px rgba(30, 20, 10, 0.04);
-        }
-
-        .ngram-inner-card {
-            background: #fbfaf8;
-            border-radius: 18px;
-            padding: 16px;
-            margin-bottom: 16px;
-            border: 1px solid #ebe3da;
-            box-shadow: 0 2px 8px rgba(30, 20, 10, 0.03);
-        }
-
-        .ngram-results-card {
-            background: #fbfaf8;
-            border-radius: 18px;
-            padding: 18px;
-            border: 1px solid #ebe3da;
-        }
-
-        .ngram-section-card .page-title {
-            margin-bottom: 8px;
-        }
-
-        .ngram-section-card .muted {
-            margin-bottom: 0;
-        }
-
-        /* inputs */
-        .ngram-inner-card input,
-        .ngram-inner-card select,
-        .ngram-inner-card textarea {
-            border: 1px solid #d1d5db !important;
-            border-radius: 7px !important;
-            box-shadow: none !important;
-        }
-
-        .ngram-inner-card input:focus,
-        .ngram-inner-card select:focus,
-        .ngram-inner-card textarea:focus {
-            border-color: #7c3aed !important;
-            box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.22) !important;
-        }
-
-        /* checkbox purple */
-        .ngram-inner-card input[type="checkbox"],
-        .form-check-input {
-            accent-color: #6d28d9 !important;
-        }
-
-        .form-check-input:checked {
-            background-color: #6d28d9 !important;
-            border-color: #6d28d9 !important;
-        }
-
-        /* buttons */
-        #download_ngram,
-        #download_ngram_xlsx {
-            width: 100% !important;
-            height: 46px !important;
-            border-radius: 7px !important;
-            font-size: 14px !important;
-            font-weight: 500 !important;
-            line-height: 1 !important;
-            white-space: nowrap !important;
-            text-align: center !important;
-
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-
-            padding: 0 12px !important;
-            transition: all 0.2s ease;
-        }
-
-        /* purple fetch button */
-        #download_ngram {
-            margin-top: 12px;
-            margin-bottom: 12px;
-            background: #6d28d9 !important;
-            border: 1px solid #6d28d9 !important;
-            color: white !important;
-        }
-
-        #download_ngram:hover {
-            background: #5b21b6 !important;
-            border-color: #5b21b6 !important;
-        }
-
-        /* download button */
-        #download_ngram_xlsx {
-            background: white !important;
-            border: 1.4px solid #111111 !important;
-            color: #111111 !important;
-        }
-
-        #download_ngram_xlsx:hover {
-            background: #111111 !important;
-            color: white !important;
-            border-color: #111111 !important;
-        }
-
-        /* remove weird link/button underline */
-        #download_ngram_xlsx,
-        #download_ngram_xlsx:hover {
-            text-decoration: none !important;
-        }
-            """
-        ),
-
-    ui.div(
-
         ui.div("Get Ngram Data", class_="page-title"),
 
         ui.p(
             "Enter words manually or upload a TXT/Excel file. "
             "The app downloads raw relative frequencies from Google Ngram. "
             "Optionally, values can be converted to words per million.",
-            class_="muted"
+            class_="muted ngram-fetcher-intro"
+        ),
+
+        ui.panel_conditional(
+            "input.user_mode === 'New here'",
+            ui.div(
+                ui.h3("New here? How this tab works"),
+                ui.p("What this tab does: it fetches Google Ngram time-series data for your word list and prepares a clean year-by-year table."),
+                ui.p("Main options: choose year range, corpus, and whether to convert output to words per million (PMW)."),
+                ui.p("Step 1: add words manually or upload a TXT/Excel file (one word per line or in the first column)."),
+                ui.p("Step 2: set Start year and End year, then choose the corpus you want to query."),
+                ui.p("Step 3: keep PMW conversion enabled when you want easier comparison across words and corpora."),
+                ui.p("Step 4: click Fetch Ngram data, review the table, then use Download Excel file for the next tabs."),
+                class_="guide-box tab-guide-box",
+            ),
         ),
 
         ui.layout_sidebar(
@@ -276,7 +67,7 @@ def get_ngram_data_ui():
                     ui.input_text_area(
                         "manual_words",
                         "Type words manually",
-                        placeholder="One word per line\nlove\nwar\nfreedom",
+                        placeholder="Type one word per line",
                         rows=6
                     ),
                     class_="inner-card"
@@ -323,12 +114,6 @@ def get_ngram_data_ui():
                     ),
 
                     ui.input_checkbox(
-                        "case_insensitive",
-                        "Case insensitive",
-                        value=False
-                    ),
-
-                    ui.input_checkbox(
                         "convert_to_pmw",
                         "Convert to words per million (PMW)",
                         value=True
@@ -358,7 +143,6 @@ def get_ngram_data_ui():
 
         class_="card section-card"
     )
-)
 
 
 def get_ngram_data_server(input, output, session, shared):
@@ -385,7 +169,11 @@ def get_ngram_data_server(input, output, session, shared):
             elif name.endswith((".xlsx", ".xls")):
                 words.extend(read_words_from_excel(path))
 
-        return unique_words(words)
+        unique = unique_words(words)
+        if REFERENCE_WORD not in unique:
+            unique.insert(0, REFERENCE_WORD)
+
+        return unique
 
     @reactive.effect
     @reactive.event(input.download_ngram)
@@ -404,7 +192,6 @@ def get_ngram_data_server(input, output, session, shared):
             return
 
         corpus = int(input.corpus())
-        case_insensitive = bool(input.case_insensitive())
         convert_to_pmw = bool(input.convert_to_pmw())
 
         scale = (
@@ -427,7 +214,6 @@ def get_ngram_data_server(input, output, session, shared):
                     year_start=year_start,
                     year_end=year_end,
                     corpus=corpus,
-                    case_insensitive=case_insensitive,
                 )
 
                 expected_len = len(years)
@@ -470,19 +256,29 @@ def get_ngram_data_server(input, output, session, shared):
         shared["uploaded_years"] = years
         shared["uploaded_scale"] = scale
 
-        choices = sorted(df["word"].dropna().unique().tolist())
+        choices = sorted(set(df["word"].dropna().unique().tolist() + [REFERENCE_WORD]))
+
+        selected = input.selected_word()
+        if selected is None:
+            selected = []
+        elif isinstance(selected, str):
+            selected = [selected]
+
+        selected = [w for w in selected if w in choices]
+        if REFERENCE_WORD not in selected:
+            selected.insert(0, REFERENCE_WORD)
 
         try:
-            ui.update_select(
+            ui.update_selectize(
                 "selected_word",
                 choices=choices,
-                selected=choices[0] if choices else None
+                selected=selected
             )
         except Exception:
             pass
 
         status_text.set(
-            f"Downloaded {len(df)} words for years {year_start}–{year_end}. "
+            f"Downloaded {len(df)} words for years {year_start}-{year_end}. "
             f"Values are {scale}."
         )
 
@@ -568,7 +364,6 @@ def get_ngram_data_server(input, output, session, shared):
                     "scale",
                     "note",
                     "corpus",
-                    "case_insensitive",
                     "year_start",
                     "year_end",
                 ],
@@ -576,7 +371,6 @@ def get_ngram_data_server(input, output, session, shared):
                     scale,
                     note,
                     input.corpus(),
-                    input.case_insensitive(),
                     input.year_start(),
                     input.year_end(),
                 ]

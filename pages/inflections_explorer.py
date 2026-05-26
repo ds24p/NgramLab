@@ -242,6 +242,72 @@ def inflections_explorer_ui():
             "Explore inflected, derived and morphologically related forms using Google Ngram data.",
             class_="muted"
         ),
+        ui.div(
+            ui.div(
+                "Recommended resources for finding inflections:",
+                class_="language-resources-note-title",
+            ),
+            ui.div(
+                ui.strong("English: "),
+                ui.a(
+                    "Wiktionary",
+                    href="https://en.wiktionary.org/",
+                    target="_blank",
+                ),
+                " | ",
+                ui.a(
+                    "WordReference Conjugator",
+                    href="https://www.wordreference.com/conj/enverbs.aspx",
+                    target="_blank",
+                ),
+                class_="language-resources-note-line",
+            ),
+            ui.div(
+                ui.strong("German: "),
+                ui.a(
+                    "Verbformen",
+                    href="https://www.verbformen.com/",
+                    target="_blank",
+                ),
+                " | ",
+                ui.a(
+                    "DWDS",
+                    href="https://www.dwds.de/wb/",
+                    target="_blank",
+                ),
+                class_="language-resources-note-line",
+            ),
+            ui.div(
+                ui.strong("Italian: "),
+                ui.a(
+                    "Italian Verbs",
+                    href="https://www.italian-verbs.com/",
+                    target="_blank",
+                ),
+                " | ",
+                ui.a(
+                    "Treccani Vocabolario",
+                    href="https://www.treccani.it/vocabolario/",
+                    target="_blank",
+                ),
+                class_="language-resources-note-line",
+            ),
+            class_="language-resources-note",
+        ),
+
+        ui.panel_conditional(
+            "input.user_mode === 'New here'",
+            ui.div(
+                ui.h3("New here? How this tab works"),
+                ui.p("What this tab does: it generates inflected, derivational, and related forms and compares their trajectories."),
+                ui.p("Main options: base word, corpus, year range, smoothing, and checkboxes controlling how forms are generated."),
+                ui.p("Step 1: set a base word and choose whether to include strict inflections, derivations, and related forms."),
+                ui.p("Step 2: click Generate candidate forms, then review/edit the list manually."),
+                ui.p("Step 3: select forms to analyze and click Fetch Google Ngram data."),
+                ui.p("Step 4: use Plot to compare curves, Data for year-by-year values, and AUC for ranking forms."),
+                class_="guide-box tab-guide-box",
+            ),
+        ),
 
         ui.layout_columns(
             ui.input_text(

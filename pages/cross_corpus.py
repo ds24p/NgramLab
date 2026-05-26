@@ -316,6 +316,120 @@ def selected_word_auc_values(
     return out, years_for_word
 
 
+def _safe_col_key(name: str) -> str:
+    cleaned = "".join(ch.lower() if ch.isalnum() else "_" for ch in str(name).strip())
+    return "_".join(part for part in cleaned.split("_") if part) or "dataset"
+
+
+def compute_timeseries_tables(
+    dfs_years: list[tuple[pd.DataFrame, list[int], str]],
+    years: list[int],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if not dfs_years or not years:
+        return pd.DataFrame(), pd.DataFrame()
+
+    names = [name for _, _, name in dfs_years]
+    word_maps = []
+
+    for df, _, _ in dfs_years:
+        cache = getattr(df, "_word_index_cache", None)
+        if cache is None:
+            cache = _build_word_index(df)
+            setattr(df, "_word_index_cache", cache)
+        word_maps.append(cache)
+
+    all_words = sorted(set().union(*[set(word_map.keys()) for word_map in word_maps]))
+
+    pair_defs = []
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            name1 = names[i]
+            name2 = names[j]
+            key1 = _safe_col_key(name1)
+            key2 = _safe_col_key(name2)
+            pair_defs.append(
+                (
+                    name1,
+                    name2,
+                    f"cor_{key1}_{key2}",
+                    f"diff_{key1}_minus_{key2}",
+                )
+            )
+
+    rows = []
+
+    for word in all_words:
+        rec = {"word": word}
+        values_by_name = {}
+
+        for word_map, name in zip(word_maps, names):
+            row = word_map.get(word)
+            if row is None:
+                values_by_name[name] = np.full(len(years), np.nan)
+            else:
+                values_by_name[name] = row[years].to_numpy(dtype=float)
+
+        for name1, name2, cor_col, diff_col in pair_defs:
+            x = values_by_name[name1]
+            y = values_by_name[name2]
+            mask = np.isfinite(x) & np.isfinite(y)
+
+            if mask.sum() >= 2:
+                x_masked = x[mask]
+                y_masked = y[mask]
+
+                if np.nanstd(x_masked) == 0 or np.nanstd(y_masked) == 0:
+                    corr = np.nan
+                else:
+                    corr = float(np.corrcoef(x_masked, y_masked)[0, 1])
+
+                diff = float(np.mean((x - y)[mask]))
+            else:
+                corr = np.nan
+                diff = np.nan
+
+            rec[cor_col] = corr
+            rec[diff_col] = diff
+
+        rows.append(rec)
+
+    timeseries_per_word = pd.DataFrame(rows)
+
+    summary_rows = []
+
+    for name1, name2, cor_col, diff_col in pair_defs:
+        for metric, col in (("correlation", cor_col), ("difference", diff_col)):
+            vals = pd.to_numeric(timeseries_per_word[col], errors="coerce").dropna()
+            n = len(vals)
+
+            if n == 0:
+                mean = np.nan
+                se = np.nan
+                ci_lower = np.nan
+                ci_upper = np.nan
+            else:
+                mean = float(vals.mean())
+                se = float(vals.std(ddof=1) / np.sqrt(n)) if n > 1 else np.nan
+                ci_lower = mean - 1.96 * se if np.isfinite(se) else np.nan
+                ci_upper = mean + 1.96 * se if np.isfinite(se) else np.nan
+
+            summary_rows.append(
+                {
+                    "comparison": f"{name1} vs {name2}",
+                    "metric": metric,
+                    "n": n,
+                    "mean": mean,
+                    "se": se,
+                    "ci_lower_95": ci_lower,
+                    "ci_upper_95": ci_upper,
+                }
+            )
+
+    timeseries_summary = pd.DataFrame(summary_rows)
+
+    return timeseries_per_word.round(4), timeseries_summary.round(4)
+
+
 def cross_corpus_ui():
     return ui.div(
         ui.div("Cross-Corpus Analysis", class_="page-title"),
@@ -324,8 +438,93 @@ def cross_corpus_ui():
             class_="muted"
         ),
 
+        ui.panel_conditional(
+            "input.user_mode === 'New here'",
+            ui.div(
+                ui.h3("New here? How this tab works"),
+                ui.p("What this tab does: it compares multiple uploaded corpus files on shared years and computes advanced cross-corpus statistics."),
+                ui.p("Main options: number of files, dataset names, uploaded Excel files, exclusion of zero years, and selected year range."),
+                ui.p("Step 1: choose Number of files, then provide a name and upload one Excel file for each dataset."),
+                ui.p("Step 2: click Run analysis to build all result tables (AUC, correlations, tests, timeseries)."),
+                ui.p("Step 3: choose a word and adjust Year range to inspect per-word trajectories and AUC boxes."),
+                ui.p("Step 4: use Timeseries per word and Timeseries summary to compare how strongly corpora co-move over time."),
+                ui.p("Step 5: enable Exclude zero years when zeros should not be treated as meaningful values."),
+                ui.h4("Required data format for uploaded files", class_="tab-guide-subtitle"),
+                ui.p(
+                    "Each uploaded Excel file should contain words in the first column. "
+                    "Each following column should represent one year and contain frequency values "
+                    "(preferably words-per-million values)."
+                ),
+                ui.div(
+                    ui.tags.table(
+                        {"class": "tab-guide-format-table"},
+                        ui.tags.thead(
+                            ui.tags.tr(
+                                ui.tags.th("word"),
+                                ui.tags.th("1900"),
+                                ui.tags.th("1901"),
+                                ui.tags.th("1902"),
+                                ui.tags.th("..."),
+                            )
+                        ),
+                        ui.tags.tbody(
+                            ui.tags.tr(
+                                ui.tags.td("example_word_1"),
+                                ui.tags.td("1.24"),
+                                ui.tags.td("1.31"),
+                                ui.tags.td("1.28"),
+                                ui.tags.td("..."),
+                            ),
+                            ui.tags.tr(
+                                ui.tags.td("example_word_2"),
+                                ui.tags.td("0.45"),
+                                ui.tags.td("0.49"),
+                                ui.tags.td("0.52"),
+                                ui.tags.td("..."),
+                            ),
+                        ),
+                    ),
+                    class_="tab-guide-format-card",
+                ),
+                class_="guide-box tab-guide-box",
+            ),
+        ),
+
         ui.layout_sidebar(
             ui.sidebar(
+                ui.panel_conditional(
+                    "input.cross_hide_resources_note == 0",
+                    ui.div(
+                        ui.div(
+                            "Recommended resources for comparative corpus analysis: ",
+                            ui.a(
+                                "Name",
+                                href="#",
+                                target="_blank",
+                            ),
+                            " | ",
+                            ui.a(
+                                "COHA",
+                                href="#",
+                                target="_blank",
+                            ),
+                            " | ",
+                            ui.a(
+                                "TIME",
+                                href="#",
+                                target="_blank",
+                            ),
+                            class_="cross-resources-text",
+                        ),
+                        ui.input_action_button(
+                            "cross_hide_resources_note",
+                            "x",
+                            class_="cross-resources-close",
+                        ),
+                        class_="cross-resources-note",
+                    ),
+                ),
+
                 ui.input_numeric(
                     "cross_num_files",
                     "Number of files",
@@ -335,6 +534,12 @@ def cross_corpus_ui():
                 ),
 
                 ui.output_ui("cross_file_inputs_ui"),
+
+                ui.input_action_button(
+                    "cross_run_analysis",
+                    "Run analysis",
+                    class_="btn-primary"
+                ),
 
                 ui.hr(),
 
@@ -355,7 +560,7 @@ def cross_corpus_ui():
 
                 ui.download_button(
                     "download_cross_xlsx",
-                    "Download XLSX"
+                    "Download Excel file"
                 ),
 
                 ui.p(
@@ -393,6 +598,16 @@ def cross_corpus_ui():
                 ),
 
                 ui.nav_panel(
+                    "Timeseries per word",
+                    ui.output_data_frame("cross_timeseries_per_word_table")
+                ),
+
+                ui.nav_panel(
+                    "Timeseries summary",
+                    ui.output_data_frame("cross_timeseries_summary_table")
+                ),
+
+                ui.nav_panel(
                     "Tests",
                     ui.output_data_frame("cross_tests_table")
                 ),
@@ -419,10 +634,14 @@ def cross_corpus_server(input_, output, session, _shared):
 
         for i in range(num):
             inputs.append(
-                ui.input_text(
-                    f"cross_name_{i}",
-                    f"Name for file {i + 1}",
-                    value="enter the name for dataset"
+                ui.div(
+                    ui.input_text(
+                        f"cross_name_{i}",
+                        f"Name for file {i + 1}",
+                        value="",
+                        placeholder="enter the name for dataset"
+                    ),
+                    class_="cross-dataset-name-input",
                 )
             )
 
@@ -459,49 +678,74 @@ def cross_corpus_server(input_, output, session, _shared):
 
         return paths
 
-    @reactive.calc
-    def datasets():
+    analysis_datasets = reactive.Value(None)
+    analysis_comparison = reactive.Value(None)
+    analysis_tests = reactive.Value(pd.DataFrame())
+    analysis_status = reactive.Value("Upload files and click Run analysis.")
+
+    @reactive.effect
+    @reactive.event(input_.cross_run_analysis)
+    def _run_cross_analysis():
         paths = uploaded_paths()
 
         if paths is None:
-            return None
+            analysis_datasets.set(None)
+            analysis_comparison.set(None)
+            analysis_tests.set(pd.DataFrame())
+            analysis_status.set("Provide a name and file for each dataset, then click Run analysis.")
 
-        ds = []
+            ui.update_selectize(
+                "cross_word",
+                choices=[],
+                selected=None
+            )
+            return
 
-        for name, path in paths:
-            df, years = load_word_year_matrix(path)
-            ds.append((df, years, name))
+        try:
+            ds = []
 
-        return ds
+            for name, path in paths:
+                df, years = load_word_year_matrix(path)
+                ds.append((df, years, name))
+
+            comp = compare_frames(
+                ds,
+                exclude_zero_years=input_.cross_exclude_zero_years()
+            )
+
+            merged, _, _, common_years = comp
+            names = [name for _, _, name in ds]
+            tests = perform_statistical_tests(merged, names)
+
+            analysis_datasets.set(ds)
+            analysis_comparison.set(comp)
+            analysis_tests.set(tests)
+            analysis_status.set(
+                f"Analysis complete for {len(ds)} datasets ({min(common_years)}-{max(common_years)}, n={len(common_years)} common years)."
+            )
+        except Exception as e:
+            analysis_datasets.set(None)
+            analysis_comparison.set(None)
+            analysis_tests.set(pd.DataFrame({"Error": [str(e)]}))
+            analysis_status.set(f"Analysis error: {e}")
+
+            ui.update_selectize(
+                "cross_word",
+                choices=[],
+                selected=None
+            )
+
+    @reactive.calc
+    def datasets():
+        return analysis_datasets.get()
 
     @reactive.calc
     def comparison():
-        ds = datasets()
-
-        if ds is None:
-            return None
-
-        return compare_frames(
-            ds,
-            exclude_zero_years=input_.cross_exclude_zero_years()
-        )
+        return analysis_comparison.get()
 
     @reactive.calc
     def statistical_tests():
-        comp = comparison()
-
-        if comp is None:
-            return pd.DataFrame()
-
-        merged, _, _, _ = comp
-        ds = datasets()
-
-        if ds is None:
-            return pd.DataFrame()
-
-        names = [name for _, _, name in ds]
-
-        return perform_statistical_tests(merged, names)
+        return analysis_tests.get()
 
     @reactive.effect
     def _update_word_choices():
@@ -535,7 +779,7 @@ def cross_corpus_server(input_, output, session, _shared):
         comp = comparison()
 
         if comp is None:
-            return ui.p("Year slider will appear after uploading files.")
+            return ui.p("Year slider will appear after running analysis.")
 
         common_years = comp[3]
 
@@ -559,6 +803,16 @@ def cross_corpus_server(input_, output, session, _shared):
         start, end = input_.cross_years()
 
         return [y for y in comp[3] if start <= y <= end]
+
+    @reactive.calc
+    def timeseries_tables() -> tuple[pd.DataFrame, pd.DataFrame]:
+        ds = datasets()
+        years = selected_years()
+
+        if ds is None or not years:
+            return pd.DataFrame(), pd.DataFrame()
+
+        return compute_timeseries_tables(ds, years)
 
     @reactive.calc
     def plot_data() -> pd.DataFrame:
@@ -591,21 +845,27 @@ def cross_corpus_server(input_, output, session, _shared):
         if comp is None:
             return ui.div(
                 {"class": "metric-box"},
-                "Upload Excel files to start analysis."
+                analysis_status.get()
             )
 
         common_years = comp[3]
+        meta = comp[2]
+        auc_mode = (
+            str(meta["AUC_mode"].iloc[0])
+            if not meta.empty and "AUC_mode" in meta.columns
+            else "common_all_years"
+        )
 
         mode_note = (
             "AUC mode: years with a zero in any corpus are excluded separately for each word."
-            if input_.cross_exclude_zero_years()
+            if auc_mode == "common_nonzero_per_word"
             else "AUC mode: all common years are used."
         )
 
         return ui.div(
             {"class": "metric-box"},
             ui.strong("Common years available: "),
-            f"{min(common_years)}–{max(common_years)} (n={len(common_years)})",
+            f"{min(common_years)}-{max(common_years)} (n={len(common_years)})",
             ui.br(),
             mode_note,
         )
@@ -755,6 +1015,18 @@ def cross_corpus_server(input_, output, session, _shared):
 
     @output
     @render.data_frame
+    def cross_timeseries_per_word_table():
+        per_word, _ = timeseries_tables()
+        return per_word
+
+    @output
+    @render.data_frame
+    def cross_timeseries_summary_table():
+        _, summary = timeseries_tables()
+        return summary
+
+    @output
+    @render.data_frame
     def cross_tests_table():
         return statistical_tests()
 
@@ -778,6 +1050,7 @@ def cross_corpus_server(input_, output, session, _shared):
 
         merged, corr, meta, _ = comp
         tests = statistical_tests()
+        timeseries_per_word, timeseries_summary = timeseries_tables()
 
         nonzero_comp = compare_frames(
             ds,
@@ -806,6 +1079,18 @@ def cross_corpus_server(input_, output, session, _shared):
                 sheet_name="AUC_correlations"
             )
 
+            timeseries_per_word.to_excel(
+                writer,
+                index=False,
+                sheet_name="Timeseries_per_word"
+            )
+
+            timeseries_summary.to_excel(
+                writer,
+                index=False,
+                sheet_name="Timeseries_summary"
+            )
+
             meta.to_excel(
                 writer,
                 index=False,
@@ -821,3 +1106,4 @@ def cross_corpus_server(input_, output, session, _shared):
         buffer.seek(0)
 
         yield buffer.read()
+

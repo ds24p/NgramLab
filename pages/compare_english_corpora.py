@@ -1,14 +1,19 @@
 from shiny import reactive, render, ui
 import pandas as pd
 import numpy as np
-import urllib.parse
-import urllib.request
-import urllib.error
-import json
 import time
-import random
 import tempfile
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+from shinywidgets import output_widget, render_widget
+
+from utils import (
+    auc_trapezoid,
+    fetch_ngram_timeseries,
+    parse_manual_words,
+    safe_corr,
+    slope_per_year,
+    trend_label,
+)
 
 
 POLITE_DELAY_SEC = 0.4
@@ -19,154 +24,6 @@ ENGLISH_CORPORA = {
     "28": "British English 2019",
     "29": "English Fiction 2019",
 }
-
-
-def fetch_ngram_timeseries(
-    word: str,
-    year_start: int,
-    year_end: int,
-    corpus: int,
-    smoothing: int = 0,
-    case_insensitive: bool = False,
-    timeout: int = 30,
-):
-    params = {
-        "content": word,
-        "year_start": str(year_start),
-        "year_end": str(year_end),
-        "corpus": str(corpus),
-        "smoothing": str(smoothing),
-    }
-
-    if case_insensitive:
-        params["case_insensitive"] = "on"
-
-    url = "https://books.google.com/ngrams/json?" + urllib.parse.urlencode(params)
-
-    max_retries = 6
-    backoff_base = 1.0
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "Mozilla/5.0"}
-            )
-
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode("utf-8")
-
-            data = json.loads(raw)
-
-            if not data:
-                return []
-
-            ts = data[0].get("timeseries", [])
-
-            if not isinstance(ts, list):
-                return []
-
-            return ts
-
-        except urllib.error.HTTPError as he:
-            if he.code == 429:
-                wait = backoff_base * (2 ** (attempt - 1)) + random.uniform(0.1, 0.5)
-                time.sleep(wait)
-                continue
-            raise
-
-        except urllib.error.URLError:
-            wait = backoff_base * (2 ** (attempt - 1)) + random.uniform(0.1, 0.5)
-            time.sleep(wait)
-            continue
-
-    raise RuntimeError(f"Failed to fetch data for '{word}'.")
-
-
-def unique_words(words):
-    out = []
-    seen = set()
-
-    for w in words:
-        w = str(w).strip()
-        if not w:
-            continue
-
-        key = w.lower()
-
-        if key not in seen:
-            seen.add(key)
-            out.append(w)
-
-    return out
-
-
-def parse_manual_words(text: str):
-    if not text:
-        return []
-
-    raw_words = []
-
-    for line in text.replace(",", "\n").splitlines():
-        word = line.strip()
-
-        if word:
-            raw_words.append(word)
-
-    return unique_words(raw_words)
-
-
-def auc_trapezoid(years, values):
-    x = np.asarray(years, dtype=float)
-    y = np.asarray(values, dtype=float)
-
-    y = np.where(np.isfinite(y), y, 0.0)
-
-    if len(x) < 2 or len(y) < 2:
-        return 0.0
-
-    return float(np.sum((y[1:] + y[:-1]) / 2 * (x[1:] - x[:-1])))
-
-
-def safe_corr(a, b):
-    a = np.asarray(a, dtype=float)
-    b = np.asarray(b, dtype=float)
-
-    mask = np.isfinite(a) & np.isfinite(b)
-
-    if mask.sum() < 2:
-        return np.nan
-
-    if np.nanstd(a[mask]) == 0 or np.nanstd(b[mask]) == 0:
-        return np.nan
-
-    return float(np.corrcoef(a[mask], b[mask])[0, 1])
-
-
-def slope_per_year(years, values):
-    x = np.asarray(years, dtype=float)
-    y = np.asarray(values, dtype=float)
-
-    mask = np.isfinite(x) & np.isfinite(y)
-
-    if mask.sum() < 2:
-        return np.nan
-
-    return float(np.polyfit(x[mask], y[mask], 1)[0])
-
-
-def trend_label(slope, threshold=0.000001):
-    if not np.isfinite(slope):
-        return "unknown"
-
-    if slope > threshold:
-        return "rising"
-
-    if slope < -threshold:
-        return "falling"
-
-    return "stable"
-
 
 def safe_peak_year(years, values):
     values = np.asarray(values, dtype=float)
@@ -191,85 +48,138 @@ def get_compare_english_corpora_ui():
         ui.p(
             "Compare selected English Google Ngram corpora. "
             "Values are converted from raw relative frequencies to words per million.",
-            class_="muted"
+            class_="muted compare-corpora-intro"
+        ),
+
+        ui.panel_conditional(
+            "input.user_mode === 'New here'",
+            ui.div(
+                ui.h3("New here? How this tab works"),
+                ui.p("What this tab does: it compares the same words across English, American, British, and Fiction corpora."),
+                ui.p("Main options: word list, selected corpora, year range, and Google smoothing parameter."),
+                ui.p("Step 1: paste words (one per line) and select the corpora you want to compare."),
+                ui.p("Step 2: set Start year and End year, then optionally increase smoothing for less noisy curves."),
+                ui.p("Step 3: click Compare corpora to build interactive trend lines and summary tables."),
+                ui.p("Step 4: check Trend Plot for trajectories, AUC Comparison for totals, and Summary Answers for interpretation."),
+                ui.p("Step 5: export with Download Excel file when you want to reuse results in external analysis."),
+                class_="guide-box tab-guide-box",
+            ),
         ),
 
         ui.layout_sidebar(
             ui.sidebar(
-                ui.input_text_area(
-                    "compare_words",
-                    "Words to compare",
-                    placeholder="Example:\nlove\nwar\nfreedom",
-                    rows=7
-                ),
+                ui.div(
+                    ui.input_text_area(
+                        "compare_words",
+                        "Words to compare",
+                        placeholder="Type one word per line",
+                        rows=7
+                    ),
 
-                ui.input_checkbox_group(
-                    "selected_corpora",
-                    "Select English corpora",
-                    choices=ENGLISH_CORPORA,
-                    selected=list(ENGLISH_CORPORA.keys())
-                ),
+                    ui.div(
+                        ui.input_checkbox_group(
+                            "selected_corpora",
+                            "Select English corpora",
+                            choices=ENGLISH_CORPORA,
+                            selected=list(ENGLISH_CORPORA.keys())
+                        ),
+                        class_="compare-corpora-corpus-group",
+                    ),
 
-                ui.input_numeric(
-                    "compare_year_start",
-                    "Start year",
-                    value=1901,
-                    min=1500,
-                    max=2019
-                ),
+                    ui.input_numeric(
+                        "compare_year_start",
+                        "Start year",
+                        value=1901,
+                        min=1500,
+                        max=2019
+                    ),
 
-                ui.input_numeric(
-                    "compare_year_end",
-                    "End year",
-                    value=2000,
-                    min=1500,
-                    max=2019
-                ),
+                    ui.input_numeric(
+                        "compare_year_end",
+                        "End year",
+                        value=2000,
+                        min=1500,
+                        max=2019
+                    ),
 
-                ui.input_numeric(
-                    "compare_smoothing",
-                    "Smoothing",
-                    value=0,
-                    min=0,
-                    max=50
-                ),
+                    ui.input_numeric(
+                        "compare_smoothing",
+                        "Smoothing",
+                        value=0,
+                        min=0,
+                        max=50
+                    ),
 
-                ui.input_checkbox(
-                    "compare_case_insensitive",
-                    "Case insensitive",
-                    value=False
-                ),
+                    ui.input_action_button(
+                        "run_english_corpus_comparison",
+                        "Compare corpora",
+                        class_="btn-primary"
+                    ),
 
-                ui.input_action_button(
-                    "run_english_corpus_comparison",
-                    "Compare corpora",
-                    class_="btn-primary"
-                ),
-
-                ui.download_button(
-                    "download_english_corpus_comparison_xlsx",
-                    "Download comparison Excel"
+                    ui.download_button(
+                        "download_english_corpus_comparison_xlsx",
+                        "Download Excel file"
+                    ),
+                    class_="inner-card compare-corpora-controls",
                 ),
             ),
 
             ui.div(
-                ui.output_text("english_corpus_status"),
+                ui.div(
+                    ui.output_text("english_corpus_status"),
+                    class_="section-description",
+                ),
 
-                ui.h4("Trend plot"),
-                ui.output_plot("english_corpus_plot"),
+                ui.div(
+                    ui.h3("Trend Plot", class_="table-section-title"),
+                    ui.p(
+                        "Interactive PMW trajectories for each selected word and corpus.",
+                        class_="muted section-description",
+                    ),
+                    ui.div(
+                        ui.div(
+                            output_widget("english_corpus_plot", width="100%"),
+                            class_="explorer-plot-inner",
+                        ),
+                        class_="explorer-plot-scroll",
+                    ),
+                    class_="analysis-section",
+                ),
 
-                ui.h4("Summary answers"),
-                ui.output_data_frame("english_corpus_summary"),
+                ui.div(
+                    ui.h3("Summary Answers", class_="table-section-title"),
+                    ui.p(
+                        "Interpretive comparisons of American, British, Fiction, and general English trajectories.",
+                        class_="muted section-description",
+                    ),
+                    ui.output_data_frame("english_corpus_summary"),
+                    class_="analysis-section",
+                ),
 
-                ui.h4("AUC comparison"),
-                ui.output_data_frame("english_corpus_auc"),
+                ui.div(
+                    ui.h3("AUC Comparison", class_="table-section-title"),
+                    ui.p(
+                        "AUC totals and directional differences between selected English corpora.",
+                        class_="muted section-description",
+                    ),
+                    ui.output_data_frame("english_corpus_auc"),
+                    class_="analysis-section",
+                ),
 
-                ui.h4("Yearly PMW data"),
-                ui.output_data_frame("english_corpus_yearly"),
+                ui.div(
+                    ui.h3("Yearly PMW Data", class_="table-section-title"),
+                    ui.p(
+                        "Year-by-year words-per-million values downloaded from Google Ngram.",
+                        class_="muted section-description",
+                    ),
+                    ui.output_data_frame("english_corpus_yearly"),
+                    class_="analysis-section",
+                ),
 
-                class_="card"
+                class_="results-card compare-corpora-results"
             )
-        )
+        ),
+        class_="card section-card compare-corpora-section",
     )
 
 
@@ -309,8 +219,6 @@ def get_compare_english_corpora_server(input, output, session, shared):
             return
 
         smoothing = int(input.compare_smoothing())
-        case_insensitive = bool(input.compare_case_insensitive())
-
         years = list(range(year_start, year_end + 1))
         expected_len = len(years)
 
@@ -330,7 +238,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
                         year_end=year_end,
                         corpus=int(corpus_id),
                         smoothing=smoothing,
-                        case_insensitive=case_insensitive,
+                        case_insensitive=False,
                     )
 
                     if not ts:
@@ -367,25 +275,19 @@ def get_compare_english_corpora_server(input, output, session, shared):
 
         yearly_df = pd.DataFrame(yearly_rows)
 
+        selected_corpus_names = set(selected_corpora.values())
+
+        series_by_word_corpus = {
+            (word, corpus): group.sort_values("year")["pmw"].to_numpy(dtype=float)
+            for (word, corpus), group in yearly_df.groupby(["word", "corpus"], sort=False)
+        }
+
         auc_rows = []
         summary_rows = []
 
         for word in words:
-            word_df = yearly_df[yearly_df["word"] == word]
-
-            corpus_series = {}
-
-            for corpus_id, corpus_name in selected_corpora.items():
-                sub = (
-                    word_df[word_df["corpus"] == corpus_name]
-                    .sort_values("year")
-                )
-
-                values = sub["pmw"].to_numpy(dtype=float)
-                corpus_series[corpus_name] = values
-
             def get_series(name):
-                return corpus_series.get(name, np.full(len(years), np.nan))
+                return series_by_word_corpus.get((word, name), np.full(len(years), np.nan))
 
             english = get_series("English 2019")
             american = get_series("American English 2019")
@@ -424,7 +326,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
             peak_english = safe_peak_year(years, english)
             peak_fiction = safe_peak_year(years, fiction)
 
-            if "American English 2019" in selected_corpora.values() and "British English 2019" in selected_corpora.values():
+            if "American English 2019" in selected_corpus_names and "British English 2019" in selected_corpus_names:
                 if auc_american > auc_british:
                     more_common_us_uk = "more frequent in American English"
                 elif auc_american < auc_british:
@@ -432,8 +334,8 @@ def get_compare_english_corpora_server(input, output, session, shared):
                 else:
                     more_common_us_uk = "same total frequency in American and British English"
 
-                trend_us = trend_label(slope_american)
-                trend_uk = trend_label(slope_british)
+                trend_us = trend_label(slope_american, threshold=0.000001)
+                trend_uk = trend_label(slope_british, threshold=0.000001)
 
                 if trend_us == trend_uk:
                     trend_answer = f"similar direction: both {trend_us}"
@@ -450,7 +352,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
                 trend_answer = "American and British comparison unavailable"
                 peak_same_us_uk = "American and British comparison unavailable"
 
-            if "English Fiction 2019" in selected_corpora.values() and "English 2019" in selected_corpora.values():
+            if "English Fiction 2019" in selected_corpus_names and "English 2019" in selected_corpus_names:
                 if auc_fiction > auc_english:
                     fiction_answer = "more frequent in English Fiction than general English"
                 elif auc_fiction < auc_english:
@@ -503,7 +405,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
 
         status_text.set(
             f"Comparison complete. Downloaded {len(words)} words for "
-            f"{year_start}–{year_end}. Values are PMW."
+            f"{year_start}-{year_end}. Values are PMW."
         )
 
     @output
@@ -512,24 +414,32 @@ def get_compare_english_corpora_server(input, output, session, shared):
         return status_text.get()
 
     @output
-    @render.plot
+    @render_widget
     def english_corpus_plot():
         df = yearly_df_value.get()
 
         if df is None or df.empty:
-            fig, ax = plt.subplots(figsize=(9, 4))
-            ax.text(
-                0.5,
-                0.5,
-                "No data to plot yet.",
-                ha="center",
-                va="center",
-                transform=ax.transAxes
+            fig = go.Figure()
+            fig.add_annotation(
+                text="No data to plot yet.",
+                x=0.5,
+                y=0.5,
+                xref="paper",
+                yref="paper",
+                showarrow=False,
+                font=dict(size=16),
             )
-            ax.set_axis_off()
+            fig.update_layout(
+                height=420,
+                margin=dict(l=30, r=30, t=50, b=30),
+                xaxis=dict(visible=False),
+                yaxis=dict(visible=False),
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+            )
             return fig
 
-        fig, ax = plt.subplots(figsize=(11, 5))
+        fig = go.Figure()
 
         for word in df["word"].dropna().unique():
             sub_word = df[df["word"] == word]
@@ -537,17 +447,62 @@ def get_compare_english_corpora_server(input, output, session, shared):
             for corpus in sub_word["corpus"].dropna().unique():
                 sub = sub_word[sub_word["corpus"] == corpus].sort_values("year")
 
-                ax.plot(
-                    sub["year"],
-                    sub["pmw"],
-                    label=f"{word} – {corpus}"
+                fig.add_trace(
+                    go.Scatter(
+                        x=sub["year"],
+                        y=sub["pmw"],
+                        mode="lines+markers",
+                        name=f"{word} - {corpus}",
+                        marker=dict(size=5),
+                        hovertemplate=(
+                            "Word: "
+                            + str(word)
+                            + "<br>Corpus: "
+                            + str(corpus)
+                            + "<br>Year: %{x}<br>PMW: %{y:.3f}<extra></extra>"
+                        ),
+                    )
                 )
 
-        ax.set_title("Word frequency over time by English corpus")
-        ax.set_xlabel("Year")
-        ax.set_ylabel("Words per million")
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.25)
+        fig.update_layout(
+            autosize=True,
+            title=dict(
+                text="Word Frequency Over Time by English Corpus",
+                x=0.01,
+                xanchor="left",
+                font=dict(size=24),
+            ),
+            xaxis_title="Year",
+            yaxis_title="Words per million",
+            height=620,
+            margin=dict(l=82, r=58, t=112, b=138),
+            hovermode="x unified",
+            font=dict(size=18),
+            legend=dict(
+                orientation="h",
+                y=-0.24,
+                x=0.5,
+                xanchor="center",
+                font=dict(size=14),
+            ),
+            paper_bgcolor="white",
+            plot_bgcolor="white",
+        )
+        fig.update_xaxes(
+            title_font=dict(size=20),
+            tickfont=dict(size=17),
+            automargin=True,
+            tickangle=0,
+            showgrid=True,
+            gridcolor="rgba(156, 163, 175, 0.22)",
+        )
+        fig.update_yaxes(
+            title_font=dict(size=20),
+            tickfont=dict(size=17),
+            automargin=True,
+            showgrid=True,
+            gridcolor="rgba(156, 163, 175, 0.22)",
+        )
 
         return fig
 
@@ -647,7 +602,6 @@ def get_compare_english_corpora_server(input, output, session, shared):
                 "scale",
                 "conversion",
                 "smoothing",
-                "case_insensitive",
                 "year_start",
                 "year_end",
             ],
@@ -657,7 +611,6 @@ def get_compare_english_corpora_server(input, output, session, shared):
                 "words per million",
                 "PMW = raw relative frequency * 1,000,000",
                 input.compare_smoothing(),
-                input.compare_case_insensitive(),
                 input.compare_year_start(),
                 input.compare_year_end(),
             ]

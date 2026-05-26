@@ -1,10 +1,22 @@
-from shiny import render, ui
+from shiny import reactive, render, ui
 from shinywidgets import output_widget, render_widget
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from itertools import combinations
 import tempfile
+import textwrap
+
+from utils import (
+    auc_trapezoid,
+    get_year_columns,
+    round_numeric_df,
+    safe_corr,
+    smooth_series,
+    slope_per_year,
+    trend_label,
+    z_score_values,
+)
 
 
 TREND_COLORS = {
@@ -13,6 +25,14 @@ TREND_COLORS = {
     "stable": "#9CA3AF",   # grey
     "unknown": "#111827",
 }
+
+REFERENCE_WORD = "the"
+DEFAULT_REFERENCE_YEARS = list(range(1901, 2001))
+
+
+def default_reference_values():
+    x = np.linspace(0, 1, len(DEFAULT_REFERENCE_YEARS))
+    return (0.6 + 0.6 * x + 0.05 * np.sin(4 * np.pi * x)).tolist()
 
 
 def explorer_ui():
@@ -28,10 +48,26 @@ def explorer_ui():
         ),
 
         ui.div(
+            ui.panel_conditional(
+                "input.user_mode === 'New here'",
+                ui.div(
+                    ui.h3("New here? How this tab works"),
+                    ui.p("What this tab does: it analyzes uploaded word trajectories and shows trends, correlations, and summary metrics."),
+                    ui.p("Main options: choose up to 5 words, optional z-score standardisation, optional smoothing, then run analysis."),
+                    ui.p("Step 1: select words from the list populated in Ngram Data Fetcher."),
+                    ui.p("Step 2: enable Z-score when you want to compare shapes instead of absolute levels."),
+                    ui.p("Step 3: enable smoothing and set window size to reduce short-term noise."),
+                    ui.p("Step 4: click Run analysis and inspect plots in order: Time Series, Indexed, Segmented Trend."),
+                    ui.p("Step 5: use Word Metrics and Pairwise/Correlation tables to compare words quantitatively."),
+                    class_="guide-box tab-guide-box",
+                ),
+            ),
+
             ui.input_selectize(
                 "selected_word",
                 "Choose up to 5 words",
-                choices=[],
+                choices=[REFERENCE_WORD],
+                selected=[REFERENCE_WORD],
                 multiple=True,
                 options={
                     "maxItems": 5,
@@ -48,6 +84,28 @@ def explorer_ui():
                 class_="standardisation-control"
             ),
 
+            ui.div(
+                ui.input_checkbox(
+                    "apply_smoothing",
+                    "Apply smoothing",
+                    value=False
+                ),
+                class_="standardisation-control"
+            ),
+
+            ui.panel_conditional(
+                "input.apply_smoothing",
+                ui.div(
+                    ui.input_numeric(
+                        "smoothing_window",
+                        "Choose size of smoothing",
+                        value=3,
+                        min=1,
+                    ),
+                    class_="standardisation-control smoothing-control",
+                ),
+            ),
+
             ui.input_action_button(
                 "run_explorer_analysis",
                 "Run analysis",
@@ -60,7 +118,7 @@ def explorer_ui():
             ),
 
             ui.p(
-                "The word 'the' is always included as an example reference in every chart and table.",
+                "The word 'the' is available for reference",
                 class_="muted section-description"
             ),
 
@@ -70,7 +128,13 @@ def explorer_ui():
                     "Interactive raw/PMW or z-score trajectories for selected words. Click Run analysis to update results.",
                     class_="muted section-description"
                 ),
-                output_widget("trajectory_plot"),
+                ui.div(
+                    ui.div(
+                        output_widget("trajectory_plot", width="100%"),
+                        class_="explorer-plot-inner",
+                    ),
+                    class_="explorer-plot-scroll",
+                ),
                 class_="analysis-section"
             ),
 
@@ -80,7 +144,13 @@ def explorer_ui():
                     "Each word starts at 100 in its first available year, making growth and decline easier to compare.",
                     class_="muted section-description"
                 ),
-                output_widget("indexed_trajectory_plot"),
+                ui.div(
+                    ui.div(
+                        output_widget("indexed_trajectory_plot", width="100%"),
+                        class_="explorer-plot-inner",
+                    ),
+                    class_="explorer-plot-scroll",
+                ),
                 class_="analysis-section"
             ),
 
@@ -90,7 +160,13 @@ def explorer_ui():
                     "Rising segments are violet, falling segments are yellow, and stable segments are grey.",
                     class_="muted section-description"
                 ),
-                output_widget("segmented_trend_plot"),
+                ui.div(
+                    ui.div(
+                        output_widget("segmented_trend_plot", width="100%"),
+                        class_="explorer-plot-inner",
+                    ),
+                    class_="explorer-plot-scroll",
+                ),
                 class_="analysis-section"
             ),
 
@@ -169,146 +245,16 @@ def explorer_ui():
                     class_="muted section-description"
                 ),
                 ui.div(
-                    output_widget("correlation_heatmap"),
-                    class_="centered-plot-container"
+                    ui.div(
+                        output_widget("correlation_heatmap", width="100%"),
+                        class_="explorer-plot-inner explorer-heatmap-inner",
+                    ),
+                    class_="centered-plot-container explorer-plot-scroll",
                 ),
                 class_="analysis-section heatmap-section"
             ),
 
             class_="card"
-        ),
-
-        ui.tags.style(
-            """
-            .explorer-hero {
-                background: #ffffff;
-                border: 1px solid #e7e0d8;
-                border-bottom: none;
-                border-radius: 22px 22px 0 0;
-                padding: 26px 28px;
-                margin-bottom: 0;
-                box-shadow: 0 10px 30px rgba(30, 20, 10, 0.04);
-            }
-
-            .explorer-hero + .card {
-                margin-top: 0 !important;
-                background: #ffffff !important;
-                border: 1px solid #e7e0d8 !important;
-                border-top: none !important;
-                border-radius: 0 0 22px 22px !important;
-                box-shadow: 0 10px 30px rgba(30, 20, 10, 0.04);
-            }
-
-            .explorer-hero .page-title {
-                margin-bottom: 8px;
-            }
-
-            .explorer-hero-text {
-                max-width: 900px;
-                margin-bottom: 0;
-                font-size: 15px;
-                line-height: 1.55;
-            }
-
-            .standardisation-control {
-                margin: 12px 0 14px 0;
-                padding: 12px 14px;
-                background: #fbfaf8;
-                border: 1px solid #eee8dc;
-                border-radius: 16px;
-            }
-
-            .run-analysis-button,
-            #download_explorer_excel {
-                border-radius: 8px !important;
-                padding: 9px 18px !important;
-                font-weight: 700 !important;
-                line-height: 1.2 !important;
-                box-shadow: none !important;
-            }
-
-            .run-analysis-button {
-                margin: 4px 12px 12px 0;
-                background: #7C3AED !important;
-                border-color: #7C3AED !important;
-                color: white !important;
-            }
-
-            #download_explorer_excel {
-                margin: 4px 0 12px 0;
-            }
-
-            #trajectory_scale_note,
-            #indexed_scale_note,
-            #segmented_scale_note,
-            #heatmap_scale_note {
-                display: block;
-                width: 100%;
-                margin-top: 8px;
-                margin-bottom: 0;
-                font-size: 13px;
-                font-weight: 650;
-                color: #6b7280;
-                text-align: center;
-            }
-
-            .analysis-section {
-                margin-top: 34px;
-                padding-top: 22px;
-                border-top: 1px solid #eee8dc;
-            }
-
-            .analysis-section:first-of-type {
-                margin-top: 22px;
-            }
-
-            .table-section-title {
-                font-size: 22px;
-                font-weight: 750;
-                color: #1f2933;
-                margin-bottom: 6px;
-            }
-
-            .section-description {
-                margin-bottom: 16px;
-                font-size: 14px;
-            }
-
-            .centered-plot-container {
-                display: flex;
-                justify-content: center;
-                align-items: center;
-                width: 100%;
-            }
-
-            .segmented-filter-controls {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 14px;
-                margin-bottom: 16px;
-            }
-
-            .segmented-filter-controls .form-group,
-            .segmented-filter-controls > div {
-                min-width: 260px;
-                flex: 1;
-                font-size: 16px;
-            }
-
-            .segmented-filter-controls input,
-            .segmented-filter-controls .selectize-control {
-                font-size: 16px;
-            }
-
-            .heatmap-section {
-                text-align: center;
-                padding-bottom: 8px;
-            }
-
-            .shiny-data-grid {
-                margin-top: 10px;
-            }
-            """
         )
     )
 
@@ -347,74 +293,106 @@ def explorer_server(input, output, session, shared):
 
         return list(selected)[:5]
 
-    def get_year_columns(df, years):
-        cols = []
-
-        for y in years:
-            if y in df.columns:
-                cols.append(y)
-            elif str(y) in df.columns:
-                cols.append(str(y))
-
-        return cols
-
     def analysis_has_run():
         return int(input.run_explorer_analysis() or 0) > 0
 
     def use_z_score():
         return bool(input.use_z_score())
 
+    def use_smoothing():
+        return bool(input.apply_smoothing())
+
+    def smoothing_window():
+        value = input.smoothing_window()
+
+        if value is None:
+            return 3
+
+        try:
+            return max(1, int(value))
+        except (TypeError, ValueError):
+            return 3
+
     def active_scale_label():
+        smoothing_note = ""
+
+        if use_smoothing():
+            smoothing_note = f" (smoothed, window={smoothing_window()})"
+
         if use_z_score():
-            return "z-score"
-        return shared.get("uploaded_scale", "raw score") or "raw score"
+            return "z-score" + smoothing_note
+        return (shared.get("uploaded_scale", "raw score") or "raw score") + smoothing_note
 
     def score_note():
-        return "Scale: z-score results" if use_z_score() else "Scale: raw score"
+        scale_part = "z-score results" if use_z_score() else "raw score"
 
-    def z_score_values(values):
-        values = np.asarray(values, dtype=float)
-        mean = np.nanmean(values) if np.isfinite(values).any() else np.nan
-        std = np.nanstd(values) if np.isfinite(values).any() else np.nan
+        if use_smoothing():
+            return f"Scale: {scale_part}, smoothing={smoothing_window()}-year moving average"
 
-        if not np.isfinite(std) or std == 0:
-            return np.zeros_like(values, dtype=float)
+        return f"Scale: {scale_part}"
 
-        return (values - mean) / std
+    def wrap_plot_text(text, width=58):
+        return "<br>".join(
+            textwrap.wrap(
+                str(text),
+                width=width,
+                break_long_words=False,
+                break_on_hyphens=False,
+            )
+        )
 
-    def round_numeric_df(df, digits=2):
-        if df.empty:
-            return df
+    def wrap_axis_label(text, width=14):
+        return "<br>".join(
+            textwrap.wrap(
+                str(text),
+                width=width,
+                break_long_words=True,
+                break_on_hyphens=False,
+            )
+        )
 
-        out = df.copy()
-        numeric_cols = out.select_dtypes(include=[np.number]).columns
-        out[numeric_cols] = out[numeric_cols].round(digits)
-        return out
-
-    def apply_common_plot_layout(fig, title, yaxis_title, height=500, margin=None):
+    def apply_common_plot_layout(fig, title, yaxis_title, height=640, margin=None):
         if margin is None:
-            margin = dict(l=70, r=45, t=82, b=70)
+            margin = dict(l=82, r=58, t=112, b=138)
 
         fig.update_layout(
-            title=dict(text=title, font=dict(size=28), x=0.02),
+            autosize=True,
+            title=dict(
+                text=wrap_plot_text(title),
+                font=dict(size=25),
+                x=0.01,
+                xanchor="left",
+                y=0.94,
+                yanchor="top",
+                pad=dict(t=10, b=8),
+            ),
             xaxis_title="Year",
             yaxis_title=yaxis_title,
             height=height,
             hovermode="x unified",
             margin=margin,
-            font=dict(size=20),
+            font=dict(size=18),
             legend=dict(
                 orientation="h",
-                y=-0.2,
+                y=-0.24,
                 x=0.5,
                 xanchor="center",
-                font=dict(size=18),
+                font=dict(size=16),
             ),
             paper_bgcolor="white",
             plot_bgcolor="white",
         )
-        fig.update_xaxes(title_font=dict(size=22), tickfont=dict(size=20))
-        fig.update_yaxes(title_font=dict(size=22), tickfont=dict(size=20))
+        fig.update_xaxes(
+            title_font=dict(size=20),
+            tickfont=dict(size=17),
+            automargin=True,
+            tickangle=0,
+        )
+        fig.update_yaxes(
+            title_font=dict(size=20),
+            tickfont=dict(size=17),
+            automargin=True,
+        )
         return fig
 
     def get_selected_data():
@@ -422,10 +400,15 @@ def explorer_server(input, output, session, shared):
         years = shared["uploaded_years"]
         words = get_selected_words()
 
-        if not analysis_has_run():
-            return None, [], []
+        if (df is None or df.empty or not years) and words == [REFERENCE_WORD]:
+            years = DEFAULT_REFERENCE_YEARS
+            year_cols = [str(y) for y in years]
+            row = {"word": REFERENCE_WORD}
+            for y, value in zip(years, default_reference_values()):
+                row[str(y)] = value
+            return pd.DataFrame([row]), years, year_cols
 
-        if df is None or df.empty or not years or not words:
+        if df is None or df.empty or not years:
             return None, [], []
 
         year_cols = get_year_columns(df, years)
@@ -433,56 +416,14 @@ def explorer_server(input, output, session, shared):
         if not year_cols:
             return None, [], []
 
-        selected_df = df[df["word"].isin(words)].copy()
+        selected_words = list(words)
+
+        if not analysis_has_run() and not selected_words:
+            return None, [], []
+
+        selected_df = df[df["word"].isin(selected_words)].copy()
 
         return selected_df, years, year_cols
-
-    def auc_trapezoid(years, values):
-        x = np.asarray(years, dtype=float)
-        y = np.asarray(values, dtype=float)
-        y = np.where(np.isfinite(y), y, 0.0)
-
-        if len(x) < 2:
-            return 0.0
-
-        return float(np.sum((y[1:] + y[:-1]) / 2 * (x[1:] - x[:-1])))
-
-    def safe_corr(a, b):
-        a = np.asarray(a, dtype=float)
-        b = np.asarray(b, dtype=float)
-
-        mask = np.isfinite(a) & np.isfinite(b)
-
-        if mask.sum() < 2:
-            return np.nan
-
-        if np.nanstd(a[mask]) == 0 or np.nanstd(b[mask]) == 0:
-            return np.nan
-
-        return float(np.corrcoef(a[mask], b[mask])[0, 1])
-
-    def slope_per_year(years, values):
-        x = np.asarray(years, dtype=float)
-        y = np.asarray(values, dtype=float)
-
-        mask = np.isfinite(x) & np.isfinite(y)
-
-        if mask.sum() < 2:
-            return np.nan
-
-        return float(np.polyfit(x[mask], y[mask], 1)[0])
-
-    def trend_label(slope):
-        if not np.isfinite(slope):
-            return "unknown"
-
-        if slope > 0:
-            return "rising"
-
-        if slope < 0:
-            return "falling"
-
-        return "stable"
 
     def local_trend_label(delta, tolerance):
         if not np.isfinite(delta):
@@ -644,19 +585,15 @@ def explorer_server(input, output, session, shared):
             for _, row in selected_df.iterrows():
                 word = row["word"]
                 values = row[year_cols].to_numpy(dtype=float)
+
+                if use_smoothing():
+                    values = smooth_series(values, window=smoothing_window())
+
                 if use_z_score():
                     values = z_score_values(values)
                 out[word] = values
 
-        reference_word = "the"
-        uploaded_df = shared.get("uploaded_df")
-        if reference_word not in out and uploaded_df is not None and not uploaded_df.empty:
-            if reference_word in uploaded_df["word"].values:
-                ref_row = uploaded_df[uploaded_df["word"] == reference_word].iloc[0]
-                ref_values = ref_row[year_cols].to_numpy(dtype=float)
-                if use_z_score():
-                    ref_values = z_score_values(ref_values)
-                out[reference_word] = ref_values
+        # Reference word 'the' is included through the selected_word control by default.
 
         return out, years
 
@@ -815,10 +752,38 @@ def explorer_server(input, output, session, shared):
 
         return pd.DataFrame(rows)
 
+    @reactive.calc
+    def word_series_data():
+        return build_word_series()
+
+    @reactive.calc
+    def segmented_trend_df_data():
+        return build_segmented_trend_df()
+
+    @reactive.calc
+    def filtered_segmented_trend_df_data():
+        return filter_segmented_trend_df(segmented_trend_df_data())
+
+    @reactive.calc
+    def metrics_df_data():
+        return build_metrics_df()
+
+    @reactive.calc
+    def pairwise_df_data():
+        return build_pairwise_df()
+
+    @reactive.calc
+    def correlation_matrix_df_data():
+        return build_correlation_matrix_df()
+
+    @reactive.calc
+    def yearly_df_data():
+        return build_yearly_df()
+
     @output
     @render_widget
     def trajectory_plot():
-        series, years = build_word_series()
+        series, years = word_series_data()
 
         if not series:
             return empty_figure("Fetch Ngram data first, then select up to 5 words.")
@@ -851,7 +816,7 @@ def explorer_server(input, output, session, shared):
             fig,
             title=f"Word trajectories over time ({score_note().replace('Scale: ', '')})",
             yaxis_title=scale,
-            height=500,
+            height=640,
         )
 
         return fig
@@ -859,7 +824,7 @@ def explorer_server(input, output, session, shared):
     @output
     @render_widget
     def indexed_trajectory_plot():
-        series, years = build_word_series()
+        series, years = word_series_data()
 
         if not series:
             return empty_figure("No selected words to compare.")
@@ -901,7 +866,7 @@ def explorer_server(input, output, session, shared):
             fig,
             title=f"Indexed trajectories: first available year = 100 ({score_note().replace('Scale: ', '')})",
             yaxis_title="Index",
-            height=500,
+            height=640,
         )
 
         return fig
@@ -909,7 +874,8 @@ def explorer_server(input, output, session, shared):
     @output
     @render_widget
     def segmented_trend_plot():
-        series, years = build_word_series()
+        series, years = word_series_data()
+        segments_df = filtered_segmented_trend_df_data()
 
         if not series:
             return empty_figure("No selected words to segment.")
@@ -932,8 +898,11 @@ def explorer_server(input, output, session, shared):
                 )
             )
 
-            segments = segment_trends_for_word(word, years, values)
-            segments = filter_segmented_trend_df(pd.DataFrame(segments)).to_dict("records")
+            segments = (
+                segments_df[segments_df["Word"] == word].to_dict("records")
+                if not segments_df.empty
+                else []
+            )
 
             for segment in segments:
                 start_year = segment["Start year"]
@@ -983,7 +952,9 @@ def explorer_server(input, output, session, shared):
                         mode="markers+text",
                         marker=dict(color="black", size=9),
                         text=[f"{word} peak"],
+                        textfont=dict(size=14),
                         textposition="top center",
+                        cliponaxis=False,
                         name=f"{word} peak",
                         showlegend=False,
                         hovertemplate=(
@@ -1000,15 +971,15 @@ def explorer_server(input, output, session, shared):
             fig,
             title=f"Segmented local trends ({score_note().replace('Scale: ', '')})",
             yaxis_title=scale,
-            height=620,
-            margin=dict(l=70, r=50, t=82, b=95),
+            height=720,
+            margin=dict(l=82, r=58, t=112, b=158),
         )
         fig.update_layout(
             hovermode="closest",
             legend=dict(
-                title=dict(text="Segment type", font=dict(size=15)),
+                title=dict(text="Segment type", font=dict(size=14)),
                 orientation="h",
-                y=-0.18,
+                y=-0.22,
                 x=0.5,
                 xanchor="center",
                 font=dict(size=14),
@@ -1020,7 +991,7 @@ def explorer_server(input, output, session, shared):
     @output
     @render.data_frame
     def word_metrics_table():
-        df = build_metrics_df()
+        df = metrics_df_data()
 
         if df.empty:
             return render.DataGrid(
@@ -1042,8 +1013,7 @@ def explorer_server(input, output, session, shared):
     @output
     @render.data_frame
     def segmented_trend_table():
-        df = build_segmented_trend_df()
-        df = filter_segmented_trend_df(df)
+        df = filtered_segmented_trend_df_data()
 
         if df.empty:
             return render.DataGrid(
@@ -1065,7 +1035,7 @@ def explorer_server(input, output, session, shared):
     @output
     @render.data_frame
     def pairwise_comparison_table():
-        df = build_pairwise_df()
+        df = pairwise_df_data()
 
         if df.empty:
             return render.DataGrid(
@@ -1087,7 +1057,7 @@ def explorer_server(input, output, session, shared):
     @output
     @render.data_frame
     def correlation_matrix_table():
-        df = build_correlation_matrix_df()
+        df = correlation_matrix_df_data()
 
         if df.empty:
             return render.DataGrid(
@@ -1109,7 +1079,7 @@ def explorer_server(input, output, session, shared):
     @output
     @render_widget
     def correlation_heatmap():
-        series, years = build_word_series()
+        series, years = word_series_data()
 
         if len(series) < 2:
             return empty_figure("Select at least two words.")
@@ -1146,9 +1116,9 @@ def explorer_server(input, output, session, shared):
                     "Word B: %{x}<br>"
                     "Correlation: %{z:.2f}<extra></extra>"
                 ),
-                textfont=dict(size=16),
+                textfont=dict(size=15),
                 colorbar=dict(
-                    title=dict(text="Pearson<br>correlation", font=dict(size=15)),
+                    title=dict(text="Pearson<br>correlation", font=dict(size=14)),
                     tickfont=dict(size=14),
                     len=0.78,
                     thickness=18,
@@ -1157,33 +1127,48 @@ def explorer_server(input, output, session, shared):
             )
         )
 
-        size = 520 + 25 * len(words)
+        size = 620 + 35 * len(words)
 
         fig.update_layout(
+            autosize=True,
             title=dict(
-                text=f"Time-series correlation heatmap ({score_note().replace('Scale: ', '')})",
+                text=wrap_plot_text(
+                    f"Time-series correlation heatmap ({score_note().replace('Scale: ', '')})",
+                    width=54,
+                ),
                 x=0.5,
                 xanchor="center",
-                font=dict(size=22),
+                y=0.94,
+                yanchor="top",
+                font=dict(size=21),
+                pad=dict(t=10, b=8),
             ),
-            width=size + 120,
-            height=size,
-            margin=dict(l=90, r=120, t=70, b=90),
+            width=size + 180,
+            height=size + 80,
+            margin=dict(l=165, r=155, t=96, b=165),
             paper_bgcolor="white",
             plot_bgcolor="white",
             font=dict(size=14),
             xaxis=dict(
                 side="bottom",
-                tickangle=35,
+                tickangle=32,
                 constrain="domain",
-                tickfont=dict(size=15),
+                tickfont=dict(size=14),
+                tickmode="array",
+                tickvals=words,
+                ticktext=[wrap_axis_label(word) for word in words],
+                automargin=True,
             ),
             yaxis=dict(
                 autorange="reversed",
                 scaleanchor="x",
                 scaleratio=1,
                 constrain="domain",
-                tickfont=dict(size=15),
+                tickfont=dict(size=14),
+                tickmode="array",
+                tickvals=words,
+                ticktext=[wrap_axis_label(word) for word in words],
+                automargin=True,
             ),
         )
 
@@ -1215,13 +1200,13 @@ def explorer_server(input, output, session, shared):
         filename=lambda: "explorer_analysis.xlsx"
     )
     def download_explorer_excel():
-        yearly_df = round_numeric_df(build_yearly_df())
-        metrics_df = round_numeric_df(build_metrics_df())
-        segmented_df = round_numeric_df(build_segmented_trend_df())
-        pairwise_df = round_numeric_df(build_pairwise_df())
-        corr_df = round_numeric_df(build_correlation_matrix_df())
+        yearly_df = round_numeric_df(yearly_df_data())
+        metrics_df = round_numeric_df(metrics_df_data())
+        segmented_df = round_numeric_df(segmented_trend_df_data())
+        pairwise_df = round_numeric_df(pairwise_df_data())
+        corr_df = round_numeric_df(correlation_matrix_df_data())
 
-        series, years = build_word_series()
+        series, years = word_series_data()
 
         meta_df = pd.DataFrame({
             "setting": [
@@ -1230,6 +1215,8 @@ def explorer_server(input, output, session, shared):
                 "year_start",
                 "year_end",
                 "scale",
+                "apply_smoothing",
+                "smoothing_window",
             ],
             "value": [
                 ", ".join(series.keys()) if series else "",
@@ -1237,6 +1224,8 @@ def explorer_server(input, output, session, shared):
                 min(years) if years else "",
                 max(years) if years else "",
                 active_scale_label(),
+                use_smoothing(),
+                smoothing_window() if use_smoothing() else "",
             ]
         })
 

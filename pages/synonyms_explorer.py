@@ -91,6 +91,72 @@ def synonyms_explorer_ui():
             "Find synonyms, select the ones you want, and compare their Google Ngram trajectories.",
             class_="muted"
         ),
+        ui.div(
+            ui.div(
+                "Recommended resources for finding synonyms:",
+                class_="language-resources-note-title",
+            ),
+            ui.div(
+                ui.strong("English: "),
+                ui.a(
+                    "Thesaurus.com",
+                    href="https://www.thesaurus.com/",
+                    target="_blank",
+                ),
+                " | ",
+                ui.a(
+                    "Merriam-Webster Thesaurus",
+                    href="https://www.merriam-webster.com/thesaurus",
+                    target="_blank",
+                ),
+                class_="language-resources-note-line",
+            ),
+            ui.div(
+                ui.strong("German: "),
+                ui.a(
+                    "Duden Synonyme",
+                    href="https://www.duden.de/synonyme",
+                    target="_blank",
+                ),
+                " | ",
+                ui.a(
+                    "OpenThesaurus",
+                    href="https://www.openthesaurus.de/",
+                    target="_blank",
+                ),
+                class_="language-resources-note-line",
+            ),
+            ui.div(
+                ui.strong("Italian: "),
+                ui.a(
+                    "Treccani Sinonimi",
+                    href="https://www.treccani.it/sinonimi/",
+                    target="_blank",
+                ),
+                " | ",
+                ui.a(
+                    "Sinonimi-Contrari",
+                    href="https://www.sinonimi-contrari.it/",
+                    target="_blank",
+                ),
+                class_="language-resources-note-line",
+            ),
+            class_="language-resources-note",
+        ),
+
+        ui.panel_conditional(
+            "input.user_mode === 'New here'",
+            ui.div(
+                ui.h3("New here? How this tab works"),
+                ui.p("What this tab does: it finds synonyms for a base word and compares their Google Ngram trajectories."),
+                ui.p("Main options: base word, max number of synonyms, corpus, year range, and smoothing."),
+                ui.p("Step 1: enter a base word and click Find synonyms."),
+                ui.p("Step 2: review generated words, keep the useful ones, remove noise, or add your own words manually."),
+                ui.p("Step 3: choose corpus, years, and smoothing, then click Fetch Google Ngram data."),
+                ui.p("Step 4: inspect Plot for dynamics, Data for raw values, and AUC for aggregate comparisons."),
+                class_="guide-box tab-guide-box",
+            ),
+        ),
 
         ui.layout_columns(
             ui.input_text(
@@ -168,7 +234,7 @@ def synonyms_explorer_ui():
             "Edit / add words manually",
             value="",
             rows=6,
-            placeholder="One word per line. You can delete suggested synonyms or add your own."
+            placeholder="Type one word per line. You can delete suggested synonyms or add your own."
         ),
 
         ui.input_action_button(
