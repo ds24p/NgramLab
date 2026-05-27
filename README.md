@@ -1,116 +1,286 @@
-# ngram_lab
+# NGRAM LAB
 
+*A workspace for exploring Google Ngram data and cross-corpus word trends.*
 
+---
 
-## Getting started
+# Overview
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+**NGRAM LAB** is an interactive Python-based application for exploring, visualizing, and comparing word frequency trajectories across multiple historical text corpora.
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+The application was designed for research workflows involving:
 
-## Add your files
+- Google Ngram datasets
+- corpus comparison
+- diachronic language analysis
+- psychological and cultural trend analysis
+- synonym and inflection exploration
+- trajectory-based statistical analysis
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+The tool combines:
 
-```
-cd existing_repo
-git remote add origin https://gitlab.inf.uni-konstanz.de/dorota.siciak/ngram_lab.git
-git branch -M main
-git push -uf origin main
-```
+- interactive visualizations
+- statistical summaries
+- AUC (Area Under the Curve) analysis
+- correlation analysis
+- cross-corpus comparisons
+- exportable research outputs
 
-## Integrate with your tools
+---
 
-* [Set up project integrations](https://gitlab.inf.uni-konstanz.de/dorota.siciak/ngram_lab/-/settings/integrations)
+# Main Features
 
-## Collaborate with your team
+## 1. Google Ngram Data Retrieval
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+- Download word trajectories directly from Google Ngram
+- Support for multiple corpora:
+  - English
+    - American English
+      - British English
+        - English Fiction
+        - Adjustable smoothing
+        - Case-insensitive search option
+        - Multi-word comparisons
 
-## Test and Deploy
+        ---
 
-Use the built-in continuous integration in GitLab.
+        ## 2. Explorer
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+        Interactive analysis environment for uploaded datasets.
 
-***
+        Includes:
 
-# Editing this README
+        - trajectory plots
+        - indexed comparisons
+        - AUC calculations
+        - segmented trend analysis
+        - peak year detection
+        - pairwise correlations
+        - correlation heatmaps
+        - z-score normalization
+        - summary statistics
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+        Users can compare multiple words simultaneously and explore long-term frequency changes over time.
 
-## Suggestions for a good README
+        ---
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+        ## 3. Synonyms Explorer
 
-## Name
-Choose a self-explaining name for your project.
+        Allows exploration of semantically related words.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+        Features include:
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+        - synonym group analysis
+        - mean trajectory computation
+        - group-level AUC calculations
+        - comparison of synonym trajectories
+        - visualization of conceptual trends instead of individual lexical items
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+        This functionality was inspired by methodological recommendations regarding improved reliability of Google Ngram studies through synonym usage.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+        ---
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+        ## 4. Inflections Explorer
 
-## Run
-On Windows you can use the bundled scripts which call the `python` on your PATH. Open PowerShell or CMD in the project root and run:
+        Morphological expansion utilities for:
 
-```powershell
-./run_app.ps1
-# or
-./run_app.bat
-```
+        - inflections
+        - related forms
+        - derivational forms
+        - lemma-based variants
 
-Alternatively run directly with the active Python:
+        Supports exploratory linguistic analysis and broader lexical coverage.
 
-```powershell
-python app.py
-```
+        ---
 
-This will start the app on `http://127.0.0.1:50817`.
+        ## 5. Cross-Corpus Analysis
 
-Or use the Shiny CLI directly:
+        Compare multiple corpora simultaneously.
 
-```powershell
-python -m shiny run --port 50817 app.py
-```
+        Supported workflows include:
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+        - uploading multiple Excel datasets
+        - comparing AUC values across corpora
+        - computing Pearson/Spearman correlations
+        - ranking trajectories
+        - identifying shared-year overlaps
+        - statistical testing between corpora
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+        The analysis pipeline supports:
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+        - Welch t-tests
+        - Mann–Whitney U tests
+        - Shapiro–Wilk normality tests
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+        ---
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+        ## 6. Excel Export
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+        Generate structured Excel reports containing:
 
-## License
-For open source projects, say how it is licensed.
+        - AUC tables
+        - rankings
+        - pairwise differences
+        - correlation matrices
+        - metadata
+        - statistical summaries
+        - trajectory comparison results
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+        ---
+
+        # Data Format
+
+        Input datasets should follow a simple matrix structure:
+
+        | word | 1900 | 1901 | 1902 | ... |
+        |------|------|------|------|------|
+        | love | 12.3 | 12.1 | 11.8 | ... |
+        | war  | 8.2  | 8.6  | 9.1  | ... |
+
+        Requirements:
+
+        - first column = word
+        - remaining columns = years
+        - values = word frequencies
+        - Excel format (`.xlsx`)
+
+        ---
+
+        # Technologies Used
+
+        ## Core Stack
+
+        - Python
+        - Shiny for Python
+        - Pandas
+        - NumPy
+        - SciPy
+        - Plotly
+        - OpenPyXL
+
+        ## Additional Libraries
+
+        - Matplotlib
+        - shinywidgets
+        - requests
+        - urllib
+
+        ---
+
+        # Statistical Methods
+
+        ## Area Under the Curve (AUC)
+
+        NGRAM LAB computes word trajectory magnitude using trapezoidal integration:
+
+        ```math
+        AUC = \int_{t_0}^{t_n} f(t)\,dt
+        ```
+
+        This allows comparison of long-term word prevalence across corpora.
+
+        ---
+
+        ## Correlation Analysis
+
+        Supported:
+
+        - Pearson correlation
+        - Spearman correlation
+        - trajectory similarity analysis
+
+        ---
+
+        ## Standardization
+
+        The application supports:
+
+        - z-score normalization
+        - indexed trajectories
+        - shared-year filtering
+        - exclusion of zero-year overlaps
+
+        These procedures improve comparability between corpora of different scales.
+
+        ---
+
+        # Research Motivation
+
+        Google Ngram data has become increasingly popular in:
+
+        - digital humanities
+        - psychology
+        - linguistics
+        - cultural analytics
+        - computational social science
+
+        However, historical corpora present several methodological challenges:
+
+        - changing corpus sizes
+        - OCR artifacts
+        - semantic ambiguity
+        - dominance of high-frequency words
+        - inconsistent coverage over time
+
+        NGRAM LAB was created to provide a transparent and reproducible environment for addressing these issues through interactive analysis tools and standardized workflows.
+
+        ---
+
+        # Related Research
+
+        The project was influenced by:
+
+        - Michel et al. (2011), *Quantitative Analysis of Culture Using Millions of Digitized Books*
+        - Younes & Reips (2019), *Guideline for improving the reliability of Google Ngram studies*
+        - research on corpus validation and psychological trend analysis
+
+        ---
+
+        # Running the Application
+
+        ## Install dependencies
+
+        ```bash
+        pip install shiny pandas numpy scipy plotly openpyxl shinywidgets matplotlib
+        ```
+
+        ## Run locally
+
+        ```bash
+        shiny run app.py
+        ```
+
+        ---
+
+        # Deployment
+
+        The application can be deployed using:
+
+        - shinyapps.io
+        - local servers
+        - institutional servers
+        - Docker environments
+
+        ---
+
+        # Example Workflow
+
+        1. Upload or retrieve word trajectories
+        2. Select words or synonym groups
+        3. Explore trajectories interactively
+        4. Compute AUC statistics
+        5. Compare corpora
+        6. Export results to Excel
+
+        ---
+
+        # Project Status
+
+        NGRAM LAB is an actively evolving research and educational project developed in the context of corpus-based trend analysis and methodological validation studies.
+
+        ---
+
+        # Author
+
+        **Dorota Siciak**  
+        University of Konstanz — iScience Group
