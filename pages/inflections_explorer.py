@@ -1,246 +1,36 @@
 from shiny import reactive, render, ui
+from shinywidgets import output_widget, render_widget
 import pandas as pd
-import numpy as np
-import requests
-import urllib.parse
-import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+import tempfile
+import uuid
 
-from utils import auc_trapezoid
-
-
-try:
-    from lemminflect import getAllInflections
-    HAS_LEMMINFLECT = True
-except ImportError:
-    HAS_LEMMINFLECT = False
-
-try:
-    from wordfreq import zipf_frequency
-    HAS_WORDFREQ = True
-except ImportError:
-    HAS_WORDFREQ = False
+from utils import (
+    PMW_LABEL,
+    build_ngram_auc_df,
+    build_ngram_group_mean_df,
+    build_ngram_wide_df,
+    clean_lower_terms,
+    parse_client_api_payload,
+    read_lower_terms_from_excel,
+    read_lower_terms_from_txt,
+)
 
 
-SPECIAL_WORD_FAMILIES = {
-    "mother": ["mother", "mothers", "mother's", "motherhood", "mothering", "mothered", "maternal", "maternity"],
-    "father": ["father", "fathers", "father's", "fatherhood", "fathering", "fathered", "paternal", "paternity"],
-    "child": ["child", "children", "childhood", "childish", "childlike"],
-    "woman": ["woman", "women", "womanhood", "womanly", "feminine", "femininity"],
-    "man": ["man", "men", "manhood", "manly", "masculine", "masculinity"],
-}
-
-
-def clean_terms(terms: list[str]) -> list[str]:
-    out = []
-    for term in terms:
-        term = str(term).strip().lower()
-        if term and term not in out:
-            out.append(term)
-    return out
-
-
-def get_strict_inflections(word: str) -> list[str]:
-    forms = [word]
-
-    if HAS_LEMMINFLECT:
-        try:
-            inflections = getAllInflections(word)
-            for values in inflections.values():
-                forms.extend(values)
-        except (AttributeError, TypeError, ValueError):
-            pass
-
-    # fallback / supplement
-    forms.extend([
-        f"{word}s",
-        f"{word}'s",
-        f"{word}ed",
-        f"{word}ing",
-    ])
-
-    return clean_terms(forms)
-
-
-def get_derivational_forms(word: str) -> list[str]:
-    suffixes = [
-        "hood",
-        "ness",
-        "ship",
-        "less",
-        "ful",
-        "ly",
-        "er",
-        "ers",
-        "ism",
-        "ist",
-        "ity",
-        "al",
-        "ation",
-    ]
-
-    forms = [word]
-    forms.extend([f"{word}{suffix}" for suffix in suffixes])
-
-    if word.endswith("e"):
-        stem = word[:-1]
-        forms.extend([
-            f"{stem}ing",
-            f"{stem}ed",
-            f"{stem}er",
-            f"{stem}ers",
-            f"{stem}ion",
-            f"{stem}ity",
-        ])
-
-    return clean_terms(forms)
-
-
-def get_related_forms_datamuse(word: str, max_words: int = 20) -> list[str]:
-    forms = []
-
-    try:
-        response = requests.get(
-            "https://api.datamuse.com/words",
-            params={
-                "ml": word,
-                "sp": f"{word[0]}*",
-                "max": max_words,
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        data = response.json()
-        forms.extend([item["word"] for item in data if "word" in item])
-    except (requests.RequestException, ValueError):
-        pass
-
-    try:
-        response = requests.get(
-            "https://api.datamuse.com/words",
-            params={
-                "rel_trg": word,
-                "max": max_words,
-            },
-            timeout=20,
-        )
-        response.raise_for_status()
-        data = response.json()
-        forms.extend([item["word"] for item in data if "word" in item])
-    except (requests.RequestException, ValueError):
-        pass
-
-    return clean_terms(forms)
-
-
-def filter_rare_words(terms: list[str], min_zipf: float = 2.5) -> list[str]:
-    if not HAS_WORDFREQ:
-        return terms
-
-    kept = []
-    for term in terms:
-        # wordfreq działa najlepiej dla pojedynczych słów bez apostrofów
-        check_term = term.replace("'s", "")
-        try:
-            score = zipf_frequency(check_term, "en")
-            if score >= min_zipf:
-                kept.append(term)
-        except (TypeError, ValueError):
-            kept.append(term)
-
-    return clean_terms(kept)
-
-
-def generate_word_family(
-    base_word: str,
-    include_inflections: bool = True,
-    include_derivations: bool = True,
-    include_related: bool = True,
-    filter_rare: bool = False,
-) -> list[str]:
-    word = base_word.strip().lower()
-
-    if not word:
-        return []
-
-    candidates = [word]
-
-    if word in SPECIAL_WORD_FAMILIES:
-        candidates.extend(SPECIAL_WORD_FAMILIES[word])
-
-    if include_inflections:
-        candidates.extend(get_strict_inflections(word))
-
-    if include_derivations:
-        candidates.extend(get_derivational_forms(word))
-
-    if include_related:
-        candidates.extend(get_related_forms_datamuse(word))
-
-    candidates = clean_terms(candidates)
-
-    if filter_rare:
-        candidates = filter_rare_words(candidates)
-
-    return candidates[:30]
-
-
-def fetch_google_ngram(
-    terms: list[str],
-    year_start: int,
-    year_end: int,
-    corpus: str,
-    smoothing: int,
-) -> pd.DataFrame:
-    terms = [t.strip() for t in terms if t.strip()]
-
-    if not terms:
-        return pd.DataFrame()
-
-    query = ",".join(terms)
-
-    url = (
-        "https://books.google.com/ngrams/json?"
-        + urllib.parse.urlencode(
-            {
-                "content": query,
-                "year_start": year_start,
-                "year_end": year_end,
-                "corpus": corpus,
-                "smoothing": smoothing,
-            }
-        )
-    )
-
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-
-    data = response.json()
-
-    years = list(range(year_start, year_end + 1))
-    rows = []
-
-    for item in data:
-        term = item["ngram"]
-        values = item["timeseries"]
-
-        for year, value in zip(years, values):
-            rows.append(
-                {
-                    "term": term,
-                    "year": year,
-                    "frequency": value,
-                }
-            )
-
-    return pd.DataFrame(rows)
+DATAMUSE_ABOUT_URL = "https://www.datamuse.com/api/"
 
 
 def inflections_explorer_ui():
     return ui.div(
         ui.div("Inflections Explorer", class_="page-title"),
         ui.p(
-            "Explore inflected, derived and morphologically related forms using Google Ngram data.",
+            "Explore manually curated inflected forms using Google Ngram data. "
+            "All values are displayed as words per million (PMW) and rounded to 2 decimals.",
             class_="muted"
+        ),
+        ui.div(
+            "Scale: words per million (PMW). PMW = raw Google Ngram relative frequency * 1,000,000.",
+            class_="inflections-scale-note",
         ),
         ui.div(
             ui.div(
@@ -299,27 +89,21 @@ def inflections_explorer_ui():
             "input.user_mode === 'New here'",
             ui.div(
                 ui.h3("New here? How this tab works"),
-                ui.p("What this tab does: it generates inflected, derivational, and related forms and compares their trajectories."),
-                ui.p("Main options: base word, corpus, year range, smoothing, and checkboxes controlling how forms are generated."),
-                ui.p("Step 1: set a base word and choose whether to include strict inflections, derivations, and related forms."),
-                ui.p("Step 2: click Generate candidate forms, then review/edit the list manually."),
-                ui.p("Step 3: select forms to analyze and click Fetch Google Ngram data."),
-                ui.p("Step 4: use Plot to compare curves, Data for year-by-year values, and AUC for ranking forms."),
+                ui.p("What this tab does: it compares manually selected inflected forms in Google Ngram data."),
+                ui.p("Main options: corpus, year range, smoothing, and the list of forms you want to analyze."),
+                ui.p("Step 1: choose corpus, years, and smoothing."),
+                ui.p("Step 2: add your forms manually from the recommended dictionaries."),
+                ui.p("Step 3: optionally generate Datamuse candidates and select any useful forms."),
+                ui.p("Step 4: click Fetch Google Ngram data, then inspect Plot, Data, and AUC."),
                 class_="guide-box tab-guide-box",
             ),
         ),
 
         ui.layout_columns(
-            ui.input_text(
-                "infl_base_word",
-                "Base word",
-                value="mother",
-                placeholder="e.g. mother"
-            ),
             ui.input_numeric(
                 "infl_year_start",
                 "Start year",
-                value=1800,
+                value=1900,
                 min=1500,
                 max=2022,
             ),
@@ -354,64 +138,76 @@ def inflections_explorer_ui():
         ),
 
         ui.layout_columns(
-            ui.input_checkbox(
-                "infl_use_inflections",
-                "Strict inflections",
-                value=True,
+            ui.div(
+                ui.input_text_area(
+                    "infl_manual_terms",
+                    "Add forms manually",
+                    value="",
+                    rows=6,
+                    placeholder="One form per line, e.g.\nmother\nmothers\nmother's\nmothering"
+                ),
+                class_="inflections-manual-entry",
             ),
-            ui.input_checkbox(
-                "infl_use_derivations",
-                "Derivational forms",
-                value=True,
+            ui.div(
+                ui.input_file(
+                    "infl_terms_file",
+                    "Or upload TXT / Excel file with forms",
+                    accept=[".txt", ".xlsx", ".xls"],
+                    multiple=False,
+                ),
+                ui.p(
+                    "TXT: one form per line. Excel: forms in the first column.",
+                    class_="muted inflections-file-hint",
+                ),
+                class_="inflections-file-entry",
             ),
-            ui.input_checkbox(
-                "infl_use_related",
-                "Related forms",
-                value=True,
-            ),
-            ui.input_checkbox(
-                "infl_filter_rare",
-                "Filter rare words",
-                value=False,
-            ),
+            col_widths=(7, 5),
+            class_="inflections-source-controls",
         ),
 
-        ui.input_action_button(
-            "infl_generate",
-            "Generate candidate forms"
+        ui.div(
+            "Alternative option: find inflections with the use of Datamuse (",
+            ui.a(
+                "about Datamuse API",
+                href=DATAMUSE_ABOUT_URL,
+                target="_blank",
+            ),
+            ").",
+            class_="inflections-alternative-note",
         ),
 
-        ui.br(),
-        ui.br(),
+        ui.div(
+            ui.input_text(
+                "infl_base_word",
+                "Base word for Datamuse",
+                value="",
+                placeholder="e.g. mother"
+            ),
+            ui.input_action_button(
+                "infl_generate",
+                "Generate candidate forms"
+            ),
+            class_="inflections-datamuse-controls",
+        ),
 
         ui.output_ui("infl_checkbox_group"),
 
         ui.layout_columns(
             ui.input_action_button("infl_select_all", "Select all"),
             ui.input_action_button("infl_select_none", "Clear all"),
+            class_="inflections-selection-actions",
         ),
 
-        ui.br(),
-
-        ui.input_text_area(
-            "infl_custom_terms",
-            "Edit / add forms manually",
-            value="",
-            rows=6,
-            placeholder="One form per line. You can delete generated forms or add your own."
-        ),
-
-        ui.input_action_button(
-            "infl_apply_manual_terms",
-            "Apply manual list"
-        ),
-
-        ui.br(),
         ui.br(),
 
         ui.input_action_button(
             "infl_fetch",
             "Fetch Google Ngram data"
+        ),
+
+        ui.download_button(
+            "download_inflections_xlsx",
+            "Download Excel file"
         ),
 
         ui.hr(),
@@ -421,7 +217,10 @@ def inflections_explorer_ui():
         ui.navset_tab(
             ui.nav_panel(
                 "Plot",
-                ui.output_plot("infl_plot")
+                ui.div(
+                    output_widget("infl_plot", width="100%"),
+                    class_="inflections-plot-container",
+                ),
             ),
             ui.nav_panel(
                 "Data",
@@ -431,16 +230,26 @@ def inflections_explorer_ui():
                 "AUC",
                 ui.output_data_frame("infl_auc_table")
             ),
+            ui.nav_panel(
+                "Group Mean",
+                ui.output_data_frame("infl_group_mean_table"),
+                ui.div(
+                    output_widget("infl_group_mean_plot", width="100%"),
+                    class_="inflections-plot-container",
+                ),
+            ),
         ),
 
         class_="card"
     )
 
 
-def inflections_explorer_server(input_, output, _session, _shared):
+def inflections_explorer_server(input_, output, session, _shared):
 
     ngram_data = reactive.Value(pd.DataFrame())
     candidate_forms = reactive.Value([])
+    pending_datamuse_request = reactive.Value(None)
+    pending_ngram_request = reactive.Value(None)
 
     def clean_terms_from_text(lines: str) -> list[str]:
         terms = [
@@ -448,37 +257,120 @@ def inflections_explorer_server(input_, output, _session, _shared):
             for line in lines.splitlines()
             if line.strip()
         ]
-        return clean_terms(terms)
+        return clean_lower_terms(terms)
+
+    def selected_candidate_forms() -> list[str]:
+        try:
+            selected = input_.infl_selected_forms()
+        except AttributeError:
+            return []
+
+        if selected is None:
+            return []
+
+        if isinstance(selected, str):
+            return [selected]
+
+        return list(selected)
+
+    def selected_terms_for_fetch() -> list[str]:
+        manual_terms = clean_terms_from_text(input_.infl_manual_terms() or "")
+        file_terms = []
+        file_info = input_.infl_terms_file()
+
+        if file_info:
+            path = file_info[0]["datapath"]
+            name = file_info[0]["name"].lower()
+
+            if name.endswith(".txt"):
+                file_terms.extend(read_lower_terms_from_txt(path))
+            elif name.endswith((".xlsx", ".xls")):
+                file_terms.extend(read_lower_terms_from_excel(path))
+
+        return clean_lower_terms(manual_terms + file_terms + selected_candidate_forms())
+
+    def build_wide_df() -> pd.DataFrame:
+        return build_ngram_wide_df(ngram_data())
+
+    def build_auc_df() -> pd.DataFrame:
+        return build_ngram_auc_df(ngram_data())
+
+    def build_group_mean_df() -> pd.DataFrame:
+        return build_ngram_group_mean_df(ngram_data())
+
+    def apply_common_plot_layout(fig, title, yaxis_title):
+        fig.update_layout(
+            title=dict(
+                text=title,
+                x=0.01,
+                xanchor="left",
+                font=dict(size=25),
+            ),
+            xaxis_title="Year",
+            yaxis_title=yaxis_title,
+            height=600,
+            hovermode="x unified",
+            margin=dict(l=84, r=44, t=92, b=116),
+            font=dict(size=18),
+            legend=dict(
+                orientation="h",
+                y=-0.2,
+                x=0.5,
+                xanchor="center",
+                font=dict(size=16),
+            ),
+            paper_bgcolor="white",
+            plot_bgcolor="white",
+        )
+        fig.update_xaxes(
+            showgrid=True,
+            gridcolor="rgba(17, 24, 39, 0.10)",
+            title_font=dict(size=21),
+            tickfont=dict(size=17),
+        )
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor="rgba(17, 24, 39, 0.10)",
+            title_font=dict(size=21),
+            tickfont=dict(size=17),
+        )
+        return fig
+
+    def empty_figure(message: str):
+        fig = go.Figure()
+        fig.add_annotation(
+            text=message,
+            x=0.5,
+            y=0.5,
+            xref="paper",
+            yref="paper",
+            showarrow=False,
+            font=dict(size=16),
+        )
+        fig.update_layout(
+            height=460,
+            margin=dict(l=40, r=30, t=50, b=40),
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            paper_bgcolor="white",
+            plot_bgcolor="white",
+        )
+        return fig
 
     @reactive.effect
     @reactive.event(input_.infl_generate)
-    def _generate_forms():
-        forms = generate_word_family(
-            base_word=input_.infl_base_word(),
-            include_inflections=input_.infl_use_inflections(),
-            include_derivations=input_.infl_use_derivations(),
-            include_related=input_.infl_use_related(),
-            filter_rare=input_.infl_filter_rare(),
-        )
-
-        candidate_forms.set(forms)
-
-        ui.update_text_area(
-            "infl_custom_terms",
-            value="\n".join(forms)
-        )
-
-    @reactive.effect
-    @reactive.event(input_.infl_apply_manual_terms)
-    def _apply_manual_terms():
-        forms = clean_terms_from_text(input_.infl_custom_terms())
-
-        candidate_forms.set(forms)
-
-        ui.update_checkbox_group(
-            "infl_selected_forms",
-            choices=forms,
-            selected=forms
+    async def _generate_forms():
+        request_id = uuid.uuid4().hex
+        pending_datamuse_request.set(request_id)
+        await session.send_custom_message(
+            "client_api_request",
+            {
+                "request_id": request_id,
+                "target": "inflections_datamuse",
+                "kind": "datamuse_inflections",
+                "word": input_.infl_base_word(),
+                "max_words": 40,
+            },
         )
 
     @output
@@ -487,13 +379,19 @@ def inflections_explorer_server(input_, output, _session, _shared):
         forms = candidate_forms()
 
         if not forms:
-            return ui.p("Generate forms first or add forms manually.", class_="muted")
+            return ui.p(
+                "Generate Datamuse candidates if you want optional suggestions.",
+                class_="muted"
+            )
 
-        return ui.input_checkbox_group(
-            "infl_selected_forms",
-            "Select forms to analyze",
-            choices=forms,
-            selected=forms,
+        return ui.div(
+            ui.input_checkbox_group(
+                "infl_selected_forms",
+                "Select Datamuse candidates to include",
+                choices=forms,
+                selected=[],
+            ),
+            class_="inflections-candidate-list",
         )
 
     @reactive.effect
@@ -517,130 +415,212 @@ def inflections_explorer_server(input_, output, _session, _shared):
 
     @reactive.effect
     @reactive.event(input_.infl_fetch)
-    def _fetch_data():
-        terms = input_.infl_selected_forms()
+    async def _fetch_data():
+        terms = selected_terms_for_fetch()
 
         if not terms:
-            ngram_data.set(pd.DataFrame({"error": ["Select at least one form."]}))
+            ngram_data.set(pd.DataFrame({"error": ["Add at least one manual form or select a Datamuse candidate."]}))
             return
 
         if len(terms) > 12:
             ngram_data.set(pd.DataFrame({"error": ["Use max 12 forms at once."]}))
             return
 
-        try:
-            df = fetch_google_ngram(
-                terms=list(terms),
-                year_start=int(input_.infl_year_start()),
-                year_end=int(input_.infl_year_end()),
-                corpus=input_.infl_corpus(),
-                smoothing=int(input_.infl_smoothing()),
-            )
+        request_id = uuid.uuid4().hex
+        pending_ngram_request.set(request_id)
+        await session.send_custom_message(
+            "client_api_request",
+            {
+                "request_id": request_id,
+                "target": "inflections_ngram",
+                "kind": "google_terms_pmw",
+                "terms": terms,
+                "year_start": int(input_.infl_year_start()),
+                "year_end": int(input_.infl_year_end()),
+                "corpus": input_.infl_corpus(),
+                "smoothing": int(input_.infl_smoothing()),
+            },
+        )
+
+    @reactive.effect
+    @reactive.event(input_.client_api_response)
+    def _handle_client_api_response():
+        payload = parse_client_api_payload(input_.client_api_response())
+        target = payload.get("target")
+
+        if target == "inflections_datamuse":
+            if payload.get("request_id") != pending_datamuse_request():
+                return
+
+            if payload.get("error"):
+                candidate_forms.set([])
+                ngram_data.set(pd.DataFrame({"error": [f"Could not fetch Datamuse candidates: {payload['error']}"]}))
+                return
+
+            candidate_forms.set(clean_lower_terms(payload.get("words", [])))
+            return
+
+        if target == "inflections_ngram":
+            if payload.get("request_id") != pending_ngram_request():
+                return
+
+            if payload.get("error"):
+                ngram_data.set(pd.DataFrame({"error": [payload["error"]]}))
+                return
+
+            df = pd.DataFrame(payload.get("rows", []))
 
             if df.empty:
                 ngram_data.set(pd.DataFrame({"error": ["No data returned from Google Ngram."]}))
             else:
                 ngram_data.set(df)
 
-        except (requests.RequestException, ValueError, TypeError) as e:
-            ngram_data.set(pd.DataFrame({"error": [str(e)]}))
+    @reactive.calc
+    def wide_df_data():
+        return build_wide_df()
+
+    @reactive.calc
+    def auc_df_data():
+        return build_auc_df()
+
+    @reactive.calc
+    def group_mean_df_data():
+        return build_group_mean_df()
 
     @output
     @render.text
     def infl_status():
         df = ngram_data()
 
-        extras = []
-        if not HAS_LEMMINFLECT:
-            extras.append("LemmInflect not installed")
-        if not HAS_WORDFREQ:
-            extras.append("wordfreq not installed")
-
-        note = ""
-        if extras:
-            note = " | Optional modules: " + ", ".join(extras)
-
         if df.empty:
-            return "Generate forms, edit/add forms if needed, select the forms you want, then fetch Google Ngram data." + note
+            return "Add forms manually or upload TXT/Excel forms, optionally choose Datamuse candidates, then fetch Google Ngram data. Values are PMW."
 
         if "error" in df.columns:
-            return f"Error: {df['error'].iloc[0]}" + note
+            return f"Error: {df['error'].iloc[0]}"
 
-        return f"Loaded {df['term'].nunique()} forms across {df['year'].nunique()} years." + note
+        return f"Loaded {df['term'].nunique()} forms across {df['year'].nunique()} years. Values are {PMW_LABEL}, rounded to 2 decimals."
 
     @output
-    @render.plot
+    @render_widget
     def infl_plot():
         df = ngram_data()
 
-        fig, ax = plt.subplots(figsize=(9, 5))
-
         if df.empty or "error" in df.columns:
-            ax.text(0.5, 0.5, "No Ngram data yet.", ha="center", va="center")
-            ax.set_axis_off()
-            return fig
+            return empty_figure("No Ngram data yet.")
+
+        fig = go.Figure()
 
         for term, group in df.groupby("term"):
             group = group.sort_values("year")
-            ax.plot(group["year"], group["frequency"], label=term)
+            fig.add_trace(
+                go.Scatter(
+                    x=group["year"],
+                    y=group["frequency"],
+                    mode="lines+markers",
+                    name=term,
+                    line=dict(width=3),
+                    marker=dict(size=5, opacity=0.85),
+                    hovertemplate=(
+                        "Form: %{fullData.name}<br>"
+                        "Year: %{x}<br>"
+                        "PMW: %{y:.2f}<extra></extra>"
+                    ),
+                )
+            )
 
-        ax.set_title(f"Google Ngram word-family trajectories: {input_.infl_base_word()}")
-        ax.set_xlabel("Year")
-        ax.set_ylabel("Frequency")
-        ax.grid(True, alpha=0.25)
-        ax.legend()
+        apply_common_plot_layout(
+            fig,
+            title="Google Ngram inflection trajectories",
+            yaxis_title="Frequency per million words (PMW)",
+        )
 
         return fig
 
     @output
     @render.data_frame
     def infl_data_table():
-        df = ngram_data()
-
-        if df.empty or "error" in df.columns:
-            return pd.DataFrame()
-
-        wide_df = (
-            df.pivot_table(
-                index="year",
-                columns="term",
-                values="frequency",
-                aggfunc="first"
-            )
-            .reset_index()
-        )
-
-        wide_df.columns.name = None
-
-        numeric_cols = wide_df.columns.drop("year")
-        wide_df[numeric_cols] = wide_df[numeric_cols].round(2)
-
-        return wide_df
+        return wide_df_data()
 
     @output
     @render.data_frame
     def infl_auc_table():
+        return auc_df_data()
+
+    @output
+    @render.data_frame
+    def infl_group_mean_table():
+        return group_mean_df_data()
+
+    @output
+    @render_widget
+    def infl_group_mean_plot():
+        df = group_mean_df_data()
+
+        if df.empty:
+            return empty_figure("No group mean data yet.")
+
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=df["year"],
+                y=df["mean_pmw"],
+                mode="lines+markers",
+                name="Group mean",
+                line=dict(width=4, color="#6d28d9"),
+                marker=dict(size=6, opacity=0.9),
+                hovertemplate=(
+                    "Year: %{x}<br>"
+                    "Group mean PMW: %{y:.2f}<extra></extra>"
+                ),
+            )
+        )
+
+        apply_common_plot_layout(
+            fig,
+            title="Mean frequency across selected inflections",
+            yaxis_title="Mean frequency per million words (PMW)",
+        )
+
+        return fig
+
+    @output
+    @render.download(filename=lambda: "inflections_ngram_pmw.xlsx")
+    def download_inflections_xlsx():
         df = ngram_data()
 
         if df.empty or "error" in df.columns:
-            return pd.DataFrame()
+            long_df = pd.DataFrame(columns=["term", "year", "pmw"])
+        else:
+            long_df = df.rename(columns={"frequency": "pmw"}).copy()
+            long_df["pmw"] = long_df["pmw"].round(2)
 
-        rows = []
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
+            path = tmp.name
 
-        for term, group in df.groupby("term"):
-            group = group.sort_values("year")
-            years = group["year"].tolist()
-            values = group["frequency"].to_numpy(dtype=float)
+        meta = pd.DataFrame({
+            "setting": [
+                "scale",
+                "note",
+                "corpus",
+                "year_start",
+                "year_end",
+                "smoothing",
+            ],
+            "value": [
+                PMW_LABEL,
+                "PMW = raw Google Ngram relative frequency * 1,000,000",
+                input_.infl_corpus(),
+                input_.infl_year_start(),
+                input_.infl_year_end(),
+                input_.infl_smoothing(),
+            ],
+        })
 
-            rows.append(
-                {
-                    "term": term,
-                    "auc": round(auc_trapezoid(years, values), 2),
-                    "mean_frequency": round(float(np.nanmean(values)), 8),
-                    "max_frequency": round(float(np.nanmax(values)), 8),
-                }
-            )
+        with pd.ExcelWriter(path, engine="openpyxl") as writer:
+            long_df.to_excel(writer, index=False, sheet_name="long_data")
+            wide_df_data().to_excel(writer, index=False, sheet_name="yearly_data")
+            auc_df_data().to_excel(writer, index=False, sheet_name="auc")
+            group_mean_df_data().to_excel(writer, index=False, sheet_name="group_mean")
+            meta.to_excel(writer, index=False, sheet_name="meta")
 
-        result = pd.DataFrame(rows).sort_values("auc", ascending=False)
-
-        return result
+        return path

@@ -1,13 +1,11 @@
 import re
 import json
-import time
-import random
-from functools import lru_cache
-import urllib.error
-import urllib.parse
-import urllib.request
 import pandas as pd
 import numpy as np
+
+
+PMW_MULTIPLIER = 1_000_000
+PMW_LABEL = "words per million (PMW)"
 
 
 def year_columns(df: pd.DataFrame) -> list[int]:
@@ -162,6 +160,21 @@ def unique_words(words) -> list[str]:
     return out
 
 
+def clean_lower_terms(terms) -> list[str]:
+    out = []
+    seen = set()
+
+    for term in terms:
+        term = str(term).strip().lower()
+        if not term or term in seen:
+            continue
+
+        seen.add(term)
+        out.append(term)
+
+    return out
+
+
 def parse_manual_words(text: str) -> list[str]:
     if not text:
         return []
@@ -177,85 +190,115 @@ def parse_manual_words(text: str) -> list[str]:
     return unique_words(raw_words)
 
 
-@lru_cache(maxsize=2048)
-def _fetch_ngram_timeseries_cached(
-    word: str,
-    year_start: int,
-    year_end: int,
-    corpus: int,
-    smoothing: int,
-    case_insensitive: bool,
-    timeout: int,
-) -> tuple[float, ...]:
-    params = {
-        "content": word,
-        "year_start": str(year_start),
-        "year_end": str(year_end),
-        "corpus": str(corpus),
-        "smoothing": str(smoothing),
-    }
+def read_word_list_from_txt(path: str) -> list[str]:
+    words = []
 
-    if case_insensitive:
-        params["case_insensitive"] = "on"
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            word = line.strip()
+            if word:
+                words.append(word)
 
-    url = "https://books.google.com/ngrams/json?" + urllib.parse.urlencode(params)
-
-    max_retries = 6
-    backoff_base = 1.0
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            req = urllib.request.Request(
-                url,
-                headers={"User-Agent": "Mozilla/5.0"},
-            )
-
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                raw = resp.read().decode("utf-8")
-
-            data = json.loads(raw)
-
-            if not data:
-                return tuple()
-
-            ts = data[0].get("timeseries", [])
-
-            if not isinstance(ts, list):
-                return tuple()
-
-            return tuple(float(v) for v in ts)
-
-        except urllib.error.HTTPError as http_error:
-            if http_error.code == 429:
-                wait = backoff_base * (2 ** (attempt - 1)) + random.uniform(0.1, 0.5)
-                time.sleep(wait)
-                continue
-            raise
-
-        except urllib.error.URLError:
-            wait = backoff_base * (2 ** (attempt - 1)) + random.uniform(0.1, 0.5)
-            time.sleep(wait)
-            continue
-
-    raise RuntimeError(f"Failed to fetch data for '{word}'.")
+    return unique_words(words)
 
 
-def fetch_ngram_timeseries(
-    word: str,
-    year_start: int,
-    year_end: int,
-    corpus: int,
-    smoothing: int = 0,
-    case_insensitive: bool = False,
-    timeout: int = 30,
-):
-    ts = _fetch_ngram_timeseries_cached(
-        str(word),
-        int(year_start),
-        int(year_end),
-        int(corpus),
-        int(smoothing),
-        bool(case_insensitive),
-        int(timeout),
+def read_word_list_from_excel(path: str) -> list[str]:
+    df = pd.read_excel(path)
+
+    if df.empty:
+        return []
+
+    first_col = df.columns[0]
+    words = (
+        df[first_col]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .tolist()
     )
-    return list(ts)
+
+    return unique_words(words)
+
+
+def read_lower_terms_from_txt(path: str) -> list[str]:
+    return clean_lower_terms(read_word_list_from_txt(path))
+
+
+def read_lower_terms_from_excel(path: str) -> list[str]:
+    return clean_lower_terms(read_word_list_from_excel(path))
+
+
+def build_ngram_wide_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "error" in df.columns:
+        return pd.DataFrame()
+
+    wide_df = (
+        df.pivot_table(
+            index="year",
+            columns="term",
+            values="frequency",
+            aggfunc="first"
+        )
+        .reset_index()
+    )
+
+    wide_df.columns.name = None
+
+    numeric_cols = wide_df.columns.drop("year")
+    wide_df[numeric_cols] = wide_df[numeric_cols].round(2)
+
+    return wide_df
+
+
+def build_ngram_auc_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "error" in df.columns:
+        return pd.DataFrame()
+
+    rows = []
+
+    for term, group in df.groupby("term"):
+        group = group.sort_values("year")
+        years = group["year"].tolist()
+        values = group["frequency"].to_numpy(dtype=float)
+
+        rows.append(
+            {
+                "term": term,
+                "auc": round(auc_trapezoid(years, values), 2),
+                "mean_pmw": round(float(np.nanmean(values)), 2),
+                "max_pmw": round(float(np.nanmax(values)), 2),
+            }
+        )
+
+    return pd.DataFrame(rows).sort_values("auc", ascending=False)
+
+
+def build_ngram_group_mean_df(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "error" in df.columns:
+        return pd.DataFrame()
+
+    result = (
+        df.groupby("year", as_index=False)["frequency"]
+        .mean()
+        .rename(columns={"frequency": "mean_pmw"})
+    )
+    result["mean_pmw"] = result["mean_pmw"].round(2)
+
+    return result
+
+
+def parse_client_api_payload(payload) -> dict:
+    if not payload:
+        return {}
+
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return {}
+
+    if isinstance(payload, dict):
+        return payload
+
+    return {}
+

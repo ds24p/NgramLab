@@ -1,38 +1,17 @@
 from shiny import reactive, render, ui
 import pandas as pd
-import time
+import uuid
 
-from utils import fetch_ngram_timeseries, parse_manual_words, unique_words
+from utils import (
+    parse_client_api_payload,
+    parse_manual_words,
+    read_word_list_from_excel,
+    read_word_list_from_txt,
+    unique_words,
+)
 
 
-POLITE_DELAY_SEC = 0.4
 REFERENCE_WORD = "the"
-
-def read_words_from_txt(path: str):
-    words = []
-
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                words.append(line)
-
-    return unique_words(words)
-
-
-def read_words_from_excel(path: str):
-    df = pd.read_excel(path)
-    first_col = df.columns[0]
-
-    words = (
-        df[first_col]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .tolist()
-    )
-
-    return unique_words(words)
 
 def get_ngram_data_ui():
     return ui.div(
@@ -150,6 +129,7 @@ def get_ngram_data_server(input, output, session, shared):
     ngram_df = reactive.Value(None)
     status_text = reactive.Value("No data fetched yet.")
     scale_text = reactive.Value("raw relative frequency")
+    pending_ngram_request = reactive.Value(None)
 
     def collect_words():
         words = []
@@ -164,10 +144,10 @@ def get_ngram_data_server(input, output, session, shared):
             name = file_info[0]["name"].lower()
 
             if name.endswith(".txt"):
-                words.extend(read_words_from_txt(path))
+                words.extend(read_word_list_from_txt(path))
 
             elif name.endswith((".xlsx", ".xls")):
-                words.extend(read_words_from_excel(path))
+                words.extend(read_word_list_from_excel(path))
 
         unique = unique_words(words)
         if REFERENCE_WORD not in unique:
@@ -177,7 +157,7 @@ def get_ngram_data_server(input, output, session, shared):
 
     @reactive.effect
     @reactive.event(input.download_ngram)
-    def _download_ngram_data():
+    async def _download_ngram_data():
         words = collect_words()
 
         if not words:
@@ -202,51 +182,96 @@ def get_ngram_data_server(input, output, session, shared):
 
         scale_text.set(scale)
 
+        request_id = uuid.uuid4().hex
+        pending_ngram_request.set(request_id)
+        status_text.set(f"Downloading data for {len(words)} words in your browser...")
+
+        await session.send_custom_message(
+            "client_api_request",
+            {
+                "request_id": request_id,
+                "target": "ngram_data_fetcher",
+                "kind": "google_words",
+                "queries": [
+                    {
+                        "key": word,
+                        "word": word,
+                        "year_start": year_start,
+                        "year_end": year_end,
+                        "corpus": corpus,
+                        "smoothing": 0,
+                    }
+                    for word in words
+                ],
+                "meta": {
+                    "words": words,
+                    "year_start": year_start,
+                    "year_end": year_end,
+                    "corpus": corpus,
+                    "scale": scale,
+                    "convert_to_pmw": convert_to_pmw,
+                },
+            },
+        )
+
+    @reactive.effect
+    @reactive.event(input.client_api_response)
+    def _handle_client_ngram_response():
+        payload = parse_client_api_payload(input.client_api_response())
+
+        if payload.get("target") != "ngram_data_fetcher":
+            return
+
+        if payload.get("request_id") != pending_ngram_request():
+            return
+
+        meta = payload.get("meta", {})
+        words = meta.get("words", [])
+        year_start = int(meta.get("year_start"))
+        year_end = int(meta.get("year_end"))
+        convert_to_pmw = bool(meta.get("convert_to_pmw"))
+        scale = meta.get("scale", "raw relative frequency")
         years = list(range(year_start, year_end + 1))
+        expected_len = len(years)
+
+        if payload.get("error"):
+            status_text.set(f"Error: {payload['error']}")
+            return
+
+        results_by_word = {
+            item.get("word"): item
+            for item in payload.get("results", [])
+        }
+
         rows = []
 
-        status_text.set(f"Downloading data for {len(words)} words...")
+        for word in words:
+            result = results_by_word.get(word, {})
+            ts = result.get("timeseries") or []
+            row = {"word": word}
 
-        for i, word in enumerate(words, start=1):
-            try:
-                ts = fetch_ngram_timeseries(
-                    word=word,
-                    year_start=year_start,
-                    year_end=year_end,
-                    corpus=corpus,
-                )
-
-                expected_len = len(years)
-
-                if not ts:
-                    ts = [0.0] * expected_len
-
-                ts = (ts + [0.0] * expected_len)[:expected_len]
-
-                row = {"word": word}
-
-                for y, value in zip(years, ts):
-                    value = float(value)
-
-                    if convert_to_pmw:
-                        value = value * 1_000_000
-
-                    row[str(y)] = value
-
-                rows.append(row)
-
-                time.sleep(POLITE_DELAY_SEC)
-
-            except Exception as e:
-                row = {"word": word}
+            if result.get("error"):
                 for y in years:
                     row[str(y)] = None
                 rows.append(row)
+                continue
 
-                print(f"Error for {word}: {e}")
+            if not ts:
+                ts = [0.0] * expected_len
+
+            ts = (ts + [0.0] * expected_len)[:expected_len]
+
+            for y, value in zip(years, ts):
+                value = float(value)
+
+                if convert_to_pmw:
+                    value = value * 1_000_000
+
+                row[str(y)] = value
+
+            rows.append(row)
 
         df = pd.DataFrame(rows)
-
         numeric_cols = df.select_dtypes(include="number").columns
         df[numeric_cols] = df[numeric_cols].round(2)
 

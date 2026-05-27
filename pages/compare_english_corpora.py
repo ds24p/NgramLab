@@ -1,22 +1,20 @@
 from shiny import reactive, render, ui
 import pandas as pd
 import numpy as np
-import time
 import tempfile
+import uuid
 import plotly.graph_objects as go
 from shinywidgets import output_widget, render_widget
 
 from utils import (
     auc_trapezoid,
-    fetch_ngram_timeseries,
+    parse_client_api_payload,
     parse_manual_words,
     safe_corr,
     slope_per_year,
     trend_label,
 )
 
-
-POLITE_DELAY_SEC = 0.4
 
 ENGLISH_CORPORA = {
     "26": "English 2019",
@@ -189,92 +187,9 @@ def get_compare_english_corpora_server(input, output, session, shared):
     summary_df_value = reactive.Value(None)
 
     status_text = reactive.Value("No comparison run yet.")
+    pending_compare_request = reactive.Value(None)
 
-    @reactive.effect
-    @reactive.event(input.run_english_corpus_comparison)
-    def _run_comparison():
-        words = parse_manual_words(input.compare_words())
-
-        if not words:
-            status_text.set("No words provided.")
-            return
-
-        selected_ids = list(input.selected_corpora())
-
-        if not selected_ids:
-            status_text.set("Select at least one corpus.")
-            return
-
-        selected_corpora = {
-            cid: ENGLISH_CORPORA[cid]
-            for cid in selected_ids
-            if cid in ENGLISH_CORPORA
-        }
-
-        year_start = int(input.compare_year_start())
-        year_end = int(input.compare_year_end())
-
-        if year_start > year_end:
-            status_text.set("Start year cannot be greater than end year.")
-            return
-
-        smoothing = int(input.compare_smoothing())
-        years = list(range(year_start, year_end + 1))
-        expected_len = len(years)
-
-        yearly_rows = []
-
-        status_text.set(
-            f"Downloading Google Ngram data for {len(words)} words "
-            f"across {len(selected_corpora)} selected English corpora..."
-        )
-
-        for word in words:
-            for corpus_id, corpus_name in selected_corpora.items():
-                try:
-                    ts = fetch_ngram_timeseries(
-                        word=word,
-                        year_start=year_start,
-                        year_end=year_end,
-                        corpus=int(corpus_id),
-                        smoothing=smoothing,
-                        case_insensitive=False,
-                    )
-
-                    if not ts:
-                        ts = [0.0] * expected_len
-
-                    ts = (ts + [0.0] * expected_len)[:expected_len]
-
-                    for year, raw_value in zip(years, ts):
-                        pmw = float(raw_value) * 1_000_000
-
-                        yearly_rows.append({
-                            "word": word,
-                            "corpus_id": corpus_id,
-                            "corpus": corpus_name,
-                            "year": year,
-                            "pmw": pmw,
-                            "raw_relative_frequency": float(raw_value),
-                        })
-
-                    time.sleep(POLITE_DELAY_SEC)
-
-                except Exception as e:
-                    print(f"Error for {word} / {corpus_name}: {e}")
-
-                    for year in years:
-                        yearly_rows.append({
-                            "word": word,
-                            "corpus_id": corpus_id,
-                            "corpus": corpus_name,
-                            "year": year,
-                            "pmw": np.nan,
-                            "raw_relative_frequency": np.nan,
-                        })
-
-        yearly_df = pd.DataFrame(yearly_rows)
-
+    def finish_comparison(words, selected_corpora, year_start, year_end, years, yearly_df):
         selected_corpus_names = set(selected_corpora.values())
 
         series_by_word_corpus = {
@@ -395,6 +310,14 @@ def get_compare_english_corpora_server(input, output, session, shared):
         auc_df = pd.DataFrame(auc_rows)
         summary_df = pd.DataFrame(summary_rows)
 
+        for df in (yearly_df, auc_df, summary_df):
+            numeric_cols = [
+                col
+                for col in df.select_dtypes(include="number").columns
+                if col != "raw_relative_frequency"
+            ]
+            df[numeric_cols] = df[numeric_cols].round(2)
+
         yearly_df_value.set(yearly_df)
         auc_df_value.set(auc_df)
         summary_df_value.set(summary_df)
@@ -407,6 +330,148 @@ def get_compare_english_corpora_server(input, output, session, shared):
             f"Comparison complete. Downloaded {len(words)} words for "
             f"{year_start}-{year_end}. Values are PMW."
         )
+
+    @reactive.effect
+    @reactive.event(input.run_english_corpus_comparison)
+    async def _run_comparison():
+        words = parse_manual_words(input.compare_words())
+
+        if not words:
+            status_text.set("No words provided.")
+            return
+
+        selected_ids = list(input.selected_corpora())
+
+        if not selected_ids:
+            status_text.set("Select at least one corpus.")
+            return
+
+        selected_corpora = {
+            cid: ENGLISH_CORPORA[cid]
+            for cid in selected_ids
+            if cid in ENGLISH_CORPORA
+        }
+
+        year_start = int(input.compare_year_start())
+        year_end = int(input.compare_year_end())
+
+        if year_start > year_end:
+            status_text.set("Start year cannot be greater than end year.")
+            return
+
+        smoothing = int(input.compare_smoothing())
+        years = list(range(year_start, year_end + 1))
+        request_id = uuid.uuid4().hex
+        pending_compare_request.set(request_id)
+
+        status_text.set(
+            f"Downloading Google Ngram data in your browser for {len(words)} words "
+            f"across {len(selected_corpora)} selected English corpora..."
+        )
+
+        queries = []
+
+        for word in words:
+            for corpus_id, corpus_name in selected_corpora.items():
+                queries.append({
+                    "key": f"{word}||{corpus_id}",
+                    "word": word,
+                    "corpus_id": corpus_id,
+                    "corpus_name": corpus_name,
+                    "year_start": year_start,
+                    "year_end": year_end,
+                    "corpus": int(corpus_id),
+                    "smoothing": smoothing,
+                    "case_insensitive": False,
+                })
+
+        await session.send_custom_message(
+            "client_api_request",
+            {
+                "request_id": request_id,
+                "target": "compare_english_corpora",
+                "kind": "google_words",
+                "queries": queries,
+                "meta": {
+                    "words": words,
+                    "selected_corpora": selected_corpora,
+                    "year_start": year_start,
+                    "year_end": year_end,
+                    "years": years,
+                    "smoothing": smoothing,
+                },
+            },
+        )
+
+    @reactive.effect
+    @reactive.event(input.client_api_response)
+    def _handle_compare_client_response():
+        payload = parse_client_api_payload(input.client_api_response())
+
+        if payload.get("target") != "compare_english_corpora":
+            return
+
+        if payload.get("request_id") != pending_compare_request():
+            return
+
+        if payload.get("error"):
+            status_text.set(f"Error: {payload['error']}")
+            return
+
+        meta = payload.get("meta", {})
+        words = meta.get("words", [])
+        selected_corpora = meta.get("selected_corpora", {})
+        year_start = int(meta.get("year_start"))
+        year_end = int(meta.get("year_end"))
+        years = list(range(year_start, year_end + 1))
+        expected_len = len(years)
+
+        results_by_key = {
+            item.get("key", f"{item.get('word')}||{item.get('corpus_id')}"): item
+            for item in payload.get("results", [])
+        }
+
+        yearly_rows = []
+
+        for word in words:
+            for corpus_id, corpus_name in selected_corpora.items():
+                result = results_by_key.get(f"{word}||{corpus_id}", {})
+                ts = result.get("timeseries") or []
+
+                if result.get("error"):
+                    print(f"Error for {word} / {corpus_name}: {result.get('error')}")
+
+                    for year in years:
+                        yearly_rows.append({
+                            "word": word,
+                            "corpus_id": corpus_id,
+                            "corpus": corpus_name,
+                            "year": year,
+                            "pmw": np.nan,
+                            "raw_relative_frequency": np.nan,
+                        })
+
+                    continue
+
+                if not ts:
+                    ts = [0.0] * expected_len
+
+                ts = (ts + [0.0] * expected_len)[:expected_len]
+
+                for year, raw_value in zip(years, ts):
+                    raw_value = float(raw_value)
+
+                    yearly_rows.append({
+                        "word": word,
+                        "corpus_id": corpus_id,
+                        "corpus": corpus_name,
+                        "year": year,
+                        "pmw": raw_value * 1_000_000,
+                        "raw_relative_frequency": raw_value,
+                    })
+
+        yearly_df = pd.DataFrame(yearly_rows)
+        finish_comparison(words, selected_corpora, year_start, year_end, years, yearly_df)
 
     @output
     @render.text
