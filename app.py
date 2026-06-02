@@ -70,6 +70,30 @@ app_ui = ui.page_fluid(
                 }
             }
 
+            function isGuideModalOpen() {
+                const guideBody = document.querySelector(".guide-modal-body");
+                const guideModal = guideBody ? guideBody.closest(".modal") : null;
+
+                return Boolean(
+                    guideModal &&
+                    (
+                        guideModal.classList.contains("show") ||
+                        guideModal.style.display === "block"
+                    )
+                );
+            }
+
+            let infoButtonSyncTimer = null;
+
+            function syncInfoButtonState() {
+                setInfoButtonActive(isGuideModalOpen());
+            }
+
+            function scheduleInfoButtonSync() {
+                window.clearTimeout(infoButtonSyncTimer);
+                infoButtonSyncTimer = window.setTimeout(syncInfoButtonState, 40);
+            }
+
             function updateMode() {
                 const selected = document.querySelector("input[name='user_mode']:checked");
                 if (!selected) return;
@@ -103,21 +127,24 @@ app_ui = ui.page_fluid(
 
                 if (target.id === "show_app_info" || target.closest("#show_app_info")) {
                     setInfoButtonActive(true);
+                    window.setTimeout(syncInfoButtonState, 800);
                 }
+            });
 
-                if (
-                    target.closest(".modal .btn") ||
-                    target.closest(".modal .btn-close") ||
-                    target.closest("[data-bs-dismiss='modal']")
-                ) {
-                    setTimeout(function () {
-                        setInfoButtonActive(false);
-                    }, 40);
-                }
+            document.addEventListener("shown.bs.modal", function () {
+                setInfoButtonActive(true);
             });
 
             document.addEventListener("hidden.bs.modal", function () {
                 setInfoButtonActive(false);
+            });
+
+            const modalObserver = new MutationObserver(scheduleInfoButtonSync);
+            modalObserver.observe(document.body, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ["class", "style"],
             });
 
             document.addEventListener("change", function (event) {
@@ -126,6 +153,7 @@ app_ui = ui.page_fluid(
                 }
             });
 
+            syncInfoButtonState();
             setTimeout(updateMode, 300);
         });
         """
