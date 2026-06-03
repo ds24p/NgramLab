@@ -44,7 +44,7 @@ def get_compare_english_corpora_ui():
 
         ui.p(
             "Compare selected English Google Ngram corpora. "
-            "Values are converted from raw relative frequencies to words per million.",
+            "Values are converted from raw relative frequencies to per million words (PMW).",
             class_="muted compare-corpora-intro"
         ),
 
@@ -130,7 +130,7 @@ def get_compare_english_corpora_ui():
                 ui.div(
                     ui.h3("Trend Plot", class_="table-section-title"),
                     ui.p(
-                        "Interactive PMW trajectories for each selected word and corpus.",
+                        "Interactive per million words (PMW) trajectories for each selected word and corpus.",
                         class_="muted section-description",
                     ),
                     ui.div(
@@ -166,7 +166,7 @@ def get_compare_english_corpora_ui():
                 ui.div(
                     ui.h3("Yearly PMW Data", class_="table-section-title"),
                     ui.p(
-                        "Year-by-year words-per-million values downloaded from Google Ngram.",
+                        "Year-by-year per million words (PMW) values downloaded from Google Ngram.",
                         class_="muted section-description",
                     ),
                     ui.output_data_frame("english_corpus_yearly"),
@@ -326,7 +326,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
 
         status_text.set(
             f"Comparison complete. Downloaded {len(words)} words for "
-            f"{year_start}-{year_end}. Values are PMW."
+            f"{year_start}-{year_end}. Values are per million words (PMW)."
         )
 
     @reactive.effect
@@ -478,7 +478,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
                 font=dict(size=24),
             ),
             xaxis_title="Year",
-            yaxis_title="Words per million",
+            yaxis_title="Per million words (PMW)",
             height=620,
             margin=dict(l=82, r=58, t=112, b=138),
             hovermode="x unified",
@@ -613,8 +613,8 @@ def get_compare_english_corpora_server(input, output, session, shared):
             "value": [
                 "English",
                 ", ".join(selected_corpora.values()),
-                "words per million",
-                "PMW = raw relative frequency * 1,000,000",
+                "per million words (PMW)",
+                "PMW (per million words) = raw relative frequency * 1,000,000",
                 input.compare_smoothing(),
                 input.compare_year_start(),
                 input.compare_year_end(),

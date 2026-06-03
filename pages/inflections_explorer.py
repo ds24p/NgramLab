@@ -19,6 +19,8 @@ from utils import (
 
 
 DATAMUSE_ABOUT_URL = "https://www.datamuse.com/api/"
+GOOGLE_NGRAM_INF_URL = "https://books.google.com/ngrams/info"
+WIKTIONARY_URL = "https://www.wiktionary.org/"
 
 
 def inflections_explorer_ui():
@@ -26,11 +28,11 @@ def inflections_explorer_ui():
         ui.div("Inflections Explorer", class_="page-title"),
         ui.p(
             "Explore manually curated inflected forms using Google Ngram data. "
-            "All values are displayed as words per million (PMW) and rounded to 2 decimals.",
+            "All values are displayed as per million words (PMW) and rounded to 2 decimals.",
             class_="muted"
         ),
         ui.div(
-            "Scale: words per million (PMW). PMW = raw Google Ngram relative frequency * 1,000,000.",
+            "Scale: per million words (PMW). PMW (per million words) = raw Google Ngram relative frequency * 1,000,000.",
             class_="inflections-scale-note",
         ),
         ui.div(
@@ -39,9 +41,24 @@ def inflections_explorer_ui():
                 class_="language-resources-note-title",
             ),
             ui.div(
-                ui.strong("English: "),
+                ui.strong("Google Ngram: "),
+                ui.a(
+                    "_INF inflection search",
+                    href=GOOGLE_NGRAM_INF_URL,
+                    target="_blank",
+                ),
+                " | ",
                 ui.a(
                     "Wiktionary",
+                    href=WIKTIONARY_URL,
+                    target="_blank",
+                ),
+                class_="language-resources-note-line",
+            ),
+            ui.div(
+                ui.strong("English: "),
+                ui.a(
+                    "Wiktionary English",
                     href="https://en.wiktionary.org/",
                     target="_blank",
                 ),
@@ -479,7 +496,7 @@ def inflections_explorer_server(input_, output, session, _shared):
         df = ngram_data()
 
         if df.empty:
-            return "Add forms manually or upload TXT/Excel forms, optionally choose Datamuse candidates, then fetch Google Ngram data. Values are PMW."
+            return "Add forms manually or upload TXT/Excel forms, optionally choose Datamuse candidates, then fetch Google Ngram data. Values are per million words (PMW)."
 
         if "error" in df.columns:
             return f"Error: {df['error'].iloc[0]}"
@@ -556,7 +573,7 @@ def inflections_explorer_server(input_, output, session, _shared):
                 marker=dict(size=6, opacity=0.9),
                 hovertemplate=(
                     "Year: %{x}<br>"
-                    "Group mean PMW: %{y:.2f}<extra></extra>"
+                    "Group mean per million words (PMW): %{y:.2f}<extra></extra>"
                 ),
             )
         )
@@ -594,7 +611,7 @@ def inflections_explorer_server(input_, output, session, _shared):
             ],
             "value": [
                 PMW_LABEL,
-                "PMW = raw Google Ngram relative frequency * 1,000,000",
+                "PMW (per million words) = raw Google Ngram relative frequency * 1,000,000",
                 input_.infl_corpus(),
                 input_.infl_year_start(),
                 input_.infl_year_end(),

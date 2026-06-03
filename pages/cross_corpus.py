@@ -35,6 +35,11 @@ except ImportError:
 from utils import load_word_year_matrix, auc_trapezoid
 
 
+NGRAM_INFO_URL = "https://books.google.com/ngrams/info"
+COHA_URL = "https://www.english-corpora.org/coha/"
+TIME_CORPUS_URL = "https://www.english-corpora.org/time/"
+
+
 def _build_word_index(df: pd.DataFrame) -> dict[str, pd.Series]:
     return {str(row["word"]): row for _, row in df.iterrows()}
 
@@ -453,7 +458,7 @@ def cross_corpus_ui():
                 ui.p(
                     "Each uploaded Excel file should contain words in the first column. "
                     "Each following column should represent one year and contain frequency values "
-                    "(preferably words-per-million values)."
+                    "(preferably per million words (PMW) values)."
                 ),
                 ui.div(
                     ui.tags.table(
@@ -496,23 +501,69 @@ def cross_corpus_ui():
                     "input.cross_hide_resources_note == 0",
                     ui.div(
                         ui.div(
-                            "Recommended resources for comparative corpus analysis: ",
-                            ui.a(
-                                "Name",
-                                href="#",
-                                target="_blank",
+                            ui.div(
+                                "Recommended sources for cross-corpus validation:",
+                                class_="cross-resources-heading",
                             ),
-                            " | ",
-                            ui.a(
-                                "COHA",
-                                href="#",
-                                target="_blank",
+                            ui.div(
+                                ui.strong("Google Ngram corpora: "),
+                                ui.a(
+                                    "English Fiction",
+                                    href=NGRAM_INFO_URL,
+                                    target="_blank",
+                                ),
+                                " | ",
+                                ui.a(
+                                    "American English",
+                                    href=NGRAM_INFO_URL,
+                                    target="_blank",
+                                ),
+                                " | ",
+                                ui.a(
+                                    "British English",
+                                    href=NGRAM_INFO_URL,
+                                    target="_blank",
+                                ),
+                                " | ",
+                                ui.a(
+                                    "German",
+                                    href=NGRAM_INFO_URL,
+                                    target="_blank",
+                                ),
+                                " | ",
+                                ui.a(
+                                    "Italian",
+                                    href=NGRAM_INFO_URL,
+                                    target="_blank",
+                                ),
+                                " | ",
+                                ui.a(
+                                    "French",
+                                    href=NGRAM_INFO_URL,
+                                    target="_blank",
+                                ),
+                                " | ",
+                                ui.a(
+                                    "Spanish",
+                                    href=NGRAM_INFO_URL,
+                                    target="_blank",
+                                ),
+                                class_="cross-resources-line",
                             ),
-                            " | ",
-                            ui.a(
-                                "TIME",
-                                href="#",
-                                target="_blank",
+                            ui.div(
+                                ui.strong("Additional corpora: "),
+                                ui.a(
+                                    "COHA",
+                                    href=COHA_URL,
+                                    target="_blank",
+                                ),
+                                " | ",
+                                ui.a(
+                                    "TIME Magazine Corpus",
+                                    href=TIME_CORPUS_URL,
+                                    target="_blank",
+                                ),
+                                class_="cross-resources-line",
                             ),
                             class_="cross-resources-text",
                         ),
@@ -564,7 +615,7 @@ def cross_corpus_ui():
                 ),
 
                 ui.p(
-                    "Assumption: input is already in PMW scale, no additional conversion.",
+                    "Assumption: input is already in per million words (PMW) scale, no additional conversion.",
                     class_="muted"
                 ),
 

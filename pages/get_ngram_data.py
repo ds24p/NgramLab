@@ -19,7 +19,7 @@ def get_ngram_data_ui():
         ui.p(
             "Enter words manually or upload a TXT/Excel file. "
             "The app downloads raw relative frequencies from Google Ngram. "
-            "Optionally, values can be converted to words per million.",
+            "Optionally, values can be converted to per million words (PMW).",
             class_="muted ngram-fetcher-intro"
         ),
 
@@ -28,7 +28,7 @@ def get_ngram_data_ui():
             ui.div(
                 ui.h3("New here? How this tab works"),
                 ui.p("What this tab does: it fetches Google Ngram time-series data for your word list and prepares a clean year-by-year table."),
-                ui.p("Main options: choose year range, corpus, and whether to convert output to words per million (PMW)."),
+                ui.p("Main options: choose year range, corpus, and whether to convert output to per million words (PMW)."),
                 ui.p("Step 1: add words manually or upload a TXT/Excel file (one word per line or in the first column)."),
                 ui.p("Step 2: set Start year and End year, then choose the corpus you want to query."),
                 ui.p("Step 3: keep PMW conversion enabled when you want easier comparison across words and corpora."),
@@ -93,7 +93,7 @@ def get_ngram_data_ui():
 
                     ui.input_checkbox(
                         "convert_to_pmw",
-                        "Convert to words per million (PMW)",
+                        "Convert to per million words (PMW)",
                         value=True
                     ),
 
@@ -173,7 +173,7 @@ def get_ngram_data_server(input, output, session, shared):
         convert_to_pmw = bool(input.convert_to_pmw())
 
         scale = (
-            "words per million (PMW)"
+            "per million words (PMW)"
             if convert_to_pmw
             else "raw relative frequency"
         )
@@ -322,13 +322,13 @@ def get_ngram_data_server(input, output, session, shared):
         convert_to_pmw = bool(input.convert_to_pmw())
 
         scale = (
-            "words per million (PMW)"
+            "per million words (PMW)"
             if convert_to_pmw
             else "raw relative frequency"
         )
 
         note = (
-            "PMW = raw relative frequency * 1,000,000"
+            "PMW (per million words) = raw relative frequency * 1,000,000"
             if convert_to_pmw
             else "Raw relative frequency returned by Google Ngram"
         )

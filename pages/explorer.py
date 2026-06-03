@@ -125,7 +125,7 @@ def explorer_ui():
             ui.div(
                 ui.h3("Time Series Comparison", class_="table-section-title"),
                 ui.p(
-                    "Interactive raw/PMW or z-score trajectories for selected words. Click Run analysis to update results.",
+                    "Interactive raw/per million words (PMW) or z-score trajectories for selected words. Click Run analysis to update results.",
                     class_="muted section-description"
                 ),
                 ui.div(
@@ -254,8 +254,9 @@ def explorer_ui():
                 class_="analysis-section heatmap-section"
             ),
 
-            class_="card"
-        )
+            class_="card explorer-results-card"
+        ),
+        class_="explorer-page",
     )
 
 
@@ -607,18 +608,29 @@ def explorer_server(input, output, session, shared):
 
         return pd.DataFrame(rows)
 
-    def get_segmented_trend_filters():
-        trends = input.segmented_trend_filter_trend() or []
-        years = input.segmented_trend_filter_year() or []
-        words = input.segmented_trend_filter_word() or []
-        if isinstance(years, str):
-            years = [years]
-        if isinstance(words, str):
-            words = [words]
+    def list_filter_values(value):
+        if value is None:
+            return []
 
-        year_values = [int(y) for y in years if str(y).isdigit()]
-        word_values = [str(w).strip().lower() for w in words if str(w).strip()]
-        return trends, year_values, word_values
+        if isinstance(value, str):
+            return [value]
+
+        return list(value)
+
+    def get_segmented_trend_filters():
+        trends = list_filter_values(input.segmented_trend_filter_trend())
+        years = list_filter_values(input.segmented_trend_filter_year())
+        words = list_filter_values(input.segmented_trend_filter_word())
+
+        trend_values = [str(t).strip() for t in trends if str(t).strip()]
+        year_values = [
+            int(year)
+            for year in (str(y).strip() for y in years)
+            if year.isdigit()
+        ]
+        word_values = {str(w).strip().casefold() for w in words if str(w).strip()}
+
+        return trend_values, year_values, word_values
 
     def filter_segmented_trend_df(df):
         if df.empty:
@@ -633,7 +645,7 @@ def explorer_server(input, output, session, shared):
             df = df[df["Start year"].isin(years) | df["End year"].isin(years)]
 
         if words:
-            df = df[df["Word"].astype(str).str.lower().isin(words)]
+            df = df[df["Word"].astype(str).str.casefold().isin(words)]
 
         return df
 
@@ -780,6 +792,42 @@ def explorer_server(input, output, session, shared):
     def yearly_df_data():
         return build_yearly_df()
 
+    @reactive.effect
+    @reactive.event(input.run_explorer_analysis, input.selected_word)
+    def _sync_segmented_word_filter_choices():
+        if not analysis_has_run():
+            ui.update_selectize(
+                "segmented_trend_filter_word",
+                choices=[],
+                selected=[],
+            )
+            return
+
+        segments_df = segmented_trend_df_data()
+        choices = (
+            sorted(
+                segments_df["Word"].dropna().astype(str).unique().tolist(),
+                key=str.casefold,
+            )
+            if not segments_df.empty and "Word" in segments_df
+            else []
+        )
+
+        choices_by_key = {word.casefold(): word for word in choices}
+        current = list_filter_values(input.segmented_trend_filter_word())
+
+        selected = [
+            choices_by_key[key]
+            for key in (str(word).strip().casefold() for word in current)
+            if key in choices_by_key
+        ]
+
+        ui.update_selectize(
+            "segmented_trend_filter_word",
+            choices=choices,
+            selected=selected,
+        )
+
     @output
     @render_widget
     def trajectory_plot():
@@ -880,10 +928,17 @@ def explorer_server(input, output, session, shared):
         if not series:
             return empty_figure("No selected words to segment.")
 
+        if segments_df.empty:
+            return empty_figure("No segmented trend data matches the current filters.")
+
         fig = go.Figure()
         legend_added = set()
+        plotted_words = set(segments_df["Word"].dropna().astype(str).tolist())
 
         for word, values in series.items():
+            if str(word) not in plotted_words:
+                continue
+
             values = np.asarray(values, dtype=float)
 
             fig.add_trace(

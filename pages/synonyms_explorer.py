@@ -19,6 +19,12 @@ from utils import (
 
 
 DATAMUSE_ABOUT_URL = "https://www.datamuse.com/api/"
+ROGET_THESAURUS_URL = "https://www.gutenberg.org/ebooks/10681"
+DUDEN_SYNONYMS_URL = "https://www.duden.de/synonyme"
+ZANICHELLI_SYNONYMS_URL = (
+    "https://www.zanichelli.it/ricerca/prodotti/"
+    "sinonimi-e-contrari-dizionario-delle-parole-equivalenti-analoghe-e-contrarie"
+)
 
 
 def synonyms_explorer_ui():
@@ -26,11 +32,11 @@ def synonyms_explorer_ui():
         ui.div("Synonyms Explorer", class_="page-title"),
         ui.p(
             "Explore manually curated synonym groups using Google Ngram data. "
-            "All values are displayed as words per million (PMW) and rounded to 2 decimals.",
+            "All values are displayed as per million words (PMW) and rounded to 2 decimals.",
             class_="muted"
         ),
         ui.div(
-            "Scale: words per million (PMW). PMW = raw Google Ngram relative frequency * 1,000,000.",
+            "Scale: per million words (PMW). PMW (per million words) = raw Google Ngram relative frequency * 1,000,000.",
             class_="synonyms-scale-note",
         ),
         ui.div(
@@ -41,14 +47,8 @@ def synonyms_explorer_ui():
             ui.div(
                 ui.strong("English: "),
                 ui.a(
-                    "Thesaurus.com",
-                    href="https://www.thesaurus.com/",
-                    target="_blank",
-                ),
-                " | ",
-                ui.a(
-                    "Merriam-Webster Thesaurus",
-                    href="https://www.merriam-webster.com/thesaurus",
+                    "Roget's Thesaurus",
+                    href=ROGET_THESAURUS_URL,
                     target="_blank",
                 ),
                 class_="language-resources-note-line",
@@ -56,14 +56,8 @@ def synonyms_explorer_ui():
             ui.div(
                 ui.strong("German: "),
                 ui.a(
-                    "Duden Synonyme",
-                    href="https://www.duden.de/synonyme",
-                    target="_blank",
-                ),
-                " | ",
-                ui.a(
-                    "OpenThesaurus",
-                    href="https://www.openthesaurus.de/",
+                    "Duden Synonymwörterbuch",
+                    href=DUDEN_SYNONYMS_URL,
                     target="_blank",
                 ),
                 class_="language-resources-note-line",
@@ -71,14 +65,8 @@ def synonyms_explorer_ui():
             ui.div(
                 ui.strong("Italian: "),
                 ui.a(
-                    "Treccani Sinonimi",
-                    href="https://www.treccani.it/sinonimi/",
-                    target="_blank",
-                ),
-                " | ",
-                ui.a(
-                    "Sinonimi-Contrari",
-                    href="https://www.sinonimi-contrari.it/",
+                    "Zanichelli Sinonimi e Contrari",
+                    href=ZANICHELLI_SYNONYMS_URL,
                     target="_blank",
                 ),
                 class_="language-resources-note-line",
@@ -479,7 +467,7 @@ def synonyms_explorer_server(input, output, session, shared):
         df = ngram_data()
 
         if df.empty:
-            return "Add synonyms manually or upload TXT/Excel words, optionally choose Datamuse synonyms, then fetch Google Ngram data. Values are PMW."
+            return "Add synonyms manually or upload TXT/Excel words, optionally choose Datamuse synonyms, then fetch Google Ngram data. Values are per million words (PMW)."
 
         if "error" in df.columns:
             return f"Error: {df['error'].iloc[0]}"
@@ -556,7 +544,7 @@ def synonyms_explorer_server(input, output, session, shared):
                 marker=dict(size=6, opacity=0.9),
                 hovertemplate=(
                     "Year: %{x}<br>"
-                    "Group mean PMW: %{y:.2f}<extra></extra>"
+                    "Group mean per million words (PMW): %{y:.2f}<extra></extra>"
                 ),
             )
         )
@@ -594,7 +582,7 @@ def synonyms_explorer_server(input, output, session, shared):
             ],
             "value": [
                 PMW_LABEL,
-                "PMW = raw Google Ngram relative frequency * 1,000,000",
+                "PMW (per million words) = raw Google Ngram relative frequency * 1,000,000",
                 input.syn_corpus(),
                 input.syn_year_start(),
                 input.syn_year_end(),

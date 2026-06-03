@@ -11,7 +11,7 @@ import numpy as np
 
 
 PMW_MULTIPLIER = 1_000_000
-PMW_LABEL = "words per million (PMW)"
+PMW_LABEL = "per million words (PMW)"
 
 
 def year_columns(df: pd.DataFrame) -> list[int]:
