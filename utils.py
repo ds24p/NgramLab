@@ -1,5 +1,11 @@
 import re
 import json
+import random
+import time
+from functools import lru_cache
+import urllib.error
+import urllib.parse
+import urllib.request
 import pandas as pd
 import numpy as np
 
@@ -226,6 +232,178 @@ def read_lower_terms_from_txt(path: str) -> list[str]:
 
 def read_lower_terms_from_excel(path: str) -> list[str]:
     return clean_lower_terms(read_word_list_from_excel(path))
+
+
+def _read_json_url(url: str, timeout: int = 30):
+    max_retries = 6
+    backoff_base = 1.0
+
+    for attempt in range(1, max_retries + 1):
+        try:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/125.0 Safari/537.36"
+                    )
+                },
+            )
+
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read().decode("utf-8")
+
+            return json.loads(raw)
+
+        except urllib.error.HTTPError as http_error:
+            if http_error.code == 429 and attempt < max_retries:
+                wait = backoff_base * (2 ** (attempt - 1)) + random.uniform(0.1, 0.5)
+                time.sleep(wait)
+                continue
+            raise
+
+        except urllib.error.URLError:
+            if attempt < max_retries:
+                wait = backoff_base * (2 ** (attempt - 1)) + random.uniform(0.1, 0.5)
+                time.sleep(wait)
+                continue
+            raise
+
+    raise RuntimeError("Failed to fetch Google Ngram data.")
+
+
+@lru_cache(maxsize=2048)
+def _fetch_ngram_timeseries_cached(
+    word: str,
+    year_start: int,
+    year_end: int,
+    corpus: int,
+    smoothing: int,
+    case_insensitive: bool,
+    timeout: int,
+) -> tuple[float, ...]:
+    params = {
+        "content": word,
+        "year_start": str(year_start),
+        "year_end": str(year_end),
+        "corpus": str(corpus),
+        "smoothing": str(smoothing),
+    }
+
+    if case_insensitive:
+        params["case_insensitive"] = "on"
+
+    url = "https://books.google.com/ngrams/json?" + urllib.parse.urlencode(params)
+    data = _read_json_url(url, timeout=timeout)
+
+    if not data:
+        return tuple()
+
+    item = next(
+        (
+            entry
+            for entry in data
+            if isinstance(entry, dict) and entry.get("ngram") == word
+        ),
+        data[0],
+    )
+
+    ts = item.get("timeseries", []) if isinstance(item, dict) else []
+
+    if not isinstance(ts, list):
+        return tuple()
+
+    return tuple(float(v) for v in ts)
+
+
+def fetch_ngram_timeseries(
+    word: str,
+    year_start: int,
+    year_end: int,
+    corpus: int,
+    smoothing: int = 0,
+    case_insensitive: bool = False,
+    timeout: int = 30,
+):
+    ts = _fetch_ngram_timeseries_cached(
+        str(word),
+        int(year_start),
+        int(year_end),
+        int(corpus),
+        int(smoothing),
+        bool(case_insensitive),
+        int(timeout),
+    )
+    return list(ts)
+
+
+@lru_cache(maxsize=256)
+def _fetch_google_ngram_pmw_rows_cached(
+    terms: tuple[str, ...],
+    year_start: int,
+    year_end: int,
+    corpus: str,
+    smoothing: int,
+    timeout: int,
+) -> tuple[tuple[str, int, float], ...]:
+    query = ",".join(terms)
+    url = (
+        "https://books.google.com/ngrams/json?"
+        + urllib.parse.urlencode(
+            {
+                "content": query,
+                "year_start": year_start,
+                "year_end": year_end,
+                "corpus": corpus,
+                "smoothing": smoothing,
+            }
+        )
+    )
+
+    data = _read_json_url(url, timeout=timeout)
+    years = list(range(year_start, year_end + 1))
+    rows = []
+
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+
+        term = item.get("ngram")
+        values = item.get("timeseries", [])
+
+        if not term or not isinstance(values, list):
+            continue
+
+        for year, value in zip(years, values):
+            rows.append((term, year, round(float(value) * PMW_MULTIPLIER, 2)))
+
+    return tuple(rows)
+
+
+def fetch_google_ngram_pmw(
+    terms: list[str],
+    year_start: int,
+    year_end: int,
+    corpus: str,
+    smoothing: int,
+    timeout: int = 30,
+) -> pd.DataFrame:
+    clean = tuple(t.strip() for t in terms if str(t).strip())
+
+    if not clean:
+        return pd.DataFrame()
+
+    rows = _fetch_google_ngram_pmw_rows_cached(
+        clean,
+        int(year_start),
+        int(year_end),
+        str(corpus),
+        int(smoothing),
+        int(timeout),
+    )
+
+    return pd.DataFrame(rows, columns=["term", "year", "frequency"])
 
 
 def build_ngram_wide_df(df: pd.DataFrame) -> pd.DataFrame:

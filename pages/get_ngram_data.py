@@ -1,9 +1,8 @@
 from shiny import reactive, render, ui
 import pandas as pd
-import uuid
 
 from utils import (
-    parse_client_api_payload,
+    fetch_ngram_timeseries,
     parse_manual_words,
     read_word_list_from_excel,
     read_word_list_from_txt,
@@ -129,7 +128,6 @@ def get_ngram_data_server(input, output, session, shared):
     ngram_df = reactive.Value(None)
     status_text = reactive.Value("No data fetched yet.")
     scale_text = reactive.Value("raw relative frequency")
-    pending_ngram_request = reactive.Value(None)
 
     def collect_words():
         words = []
@@ -157,7 +155,7 @@ def get_ngram_data_server(input, output, session, shared):
 
     @reactive.effect
     @reactive.event(input.download_ngram)
-    async def _download_ngram_data():
+    def _download_ngram_data():
         words = collect_words()
 
         if not words:
@@ -181,76 +179,27 @@ def get_ngram_data_server(input, output, session, shared):
         )
 
         scale_text.set(scale)
-
-        request_id = uuid.uuid4().hex
-        pending_ngram_request.set(request_id)
-        status_text.set(f"Downloading data for {len(words)} words in your browser...")
-
-        await session.send_custom_message(
-            "client_api_request",
-            {
-                "request_id": request_id,
-                "target": "ngram_data_fetcher",
-                "kind": "google_words",
-                "queries": [
-                    {
-                        "key": word,
-                        "word": word,
-                        "year_start": year_start,
-                        "year_end": year_end,
-                        "corpus": corpus,
-                        "smoothing": 0,
-                    }
-                    for word in words
-                ],
-                "meta": {
-                    "words": words,
-                    "year_start": year_start,
-                    "year_end": year_end,
-                    "corpus": corpus,
-                    "scale": scale,
-                    "convert_to_pmw": convert_to_pmw,
-                },
-            },
-        )
-
-    @reactive.effect
-    @reactive.event(input.client_api_response)
-    def _handle_client_ngram_response():
-        payload = parse_client_api_payload(input.client_api_response())
-
-        if payload.get("target") != "ngram_data_fetcher":
-            return
-
-        if payload.get("request_id") != pending_ngram_request():
-            return
-
-        meta = payload.get("meta", {})
-        words = meta.get("words", [])
-        year_start = int(meta.get("year_start"))
-        year_end = int(meta.get("year_end"))
-        convert_to_pmw = bool(meta.get("convert_to_pmw"))
-        scale = meta.get("scale", "raw relative frequency")
         years = list(range(year_start, year_end + 1))
         expected_len = len(years)
 
-        if payload.get("error"):
-            status_text.set(f"Error: {payload['error']}")
-            return
-
-        results_by_word = {
-            item.get("word"): item
-            for item in payload.get("results", [])
-        }
-
         rows = []
+        errors = []
 
         for word in words:
-            result = results_by_word.get(word, {})
-            ts = result.get("timeseries") or []
             row = {"word": word}
 
-            if result.get("error"):
+            try:
+                ts = fetch_ngram_timeseries(
+                    word=word,
+                    year_start=year_start,
+                    year_end=year_end,
+                    corpus=corpus,
+                    smoothing=0,
+                    case_insensitive=False,
+                )
+            except Exception as exc:
+                errors.append(f"{word}: {exc}")
+
                 for y in years:
                     row[str(y)] = None
                 rows.append(row)
@@ -306,6 +255,13 @@ def get_ngram_data_server(input, output, session, shared):
             f"Downloaded {len(df)} words for years {year_start}-{year_end}. "
             f"Values are {scale}."
         )
+
+        if errors:
+            status_text.set(
+                f"Downloaded {len(df) - len(errors)} of {len(df)} words for "
+                f"{year_start}-{year_end}. Values are {scale}. "
+                f"{len(errors)} word(s) could not be fetched."
+            )
 
     @output
     @render.text

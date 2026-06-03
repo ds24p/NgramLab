@@ -162,9 +162,7 @@ app_ui = ui.page_fluid(
     ui.tags.script(
         """
         (function () {
-            const GOOGLE_NGRAM_URL = "https://books.google.com/ngrams/json";
             const DATAMUSE_URL = "https://api.datamuse.com/words";
-            const PMW_MULTIPLIER = 1000000;
 
             function sendResponse(payload) {
                 if (!window.Shiny || !window.Shiny.setInputValue) return;
@@ -197,99 +195,6 @@ app_ui = ui.page_fluid(
                 }
 
                 return await response.json();
-            }
-
-            async function fetchGoogleSeries(query) {
-                const params = {
-                    content: query.word,
-                    year_start: query.year_start,
-                    year_end: query.year_end,
-                    corpus: query.corpus,
-                    smoothing: query.smoothing || 0,
-                };
-
-                if (query.case_insensitive) {
-                    params.case_insensitive = "on";
-                }
-
-                const data = await fetchJson(buildUrl(GOOGLE_NGRAM_URL, params));
-
-                if (!Array.isArray(data) || data.length === 0) {
-                    return [];
-                }
-
-                const item = data.find(function (entry) {
-                    return entry && entry.ngram === query.word;
-                }) || data[0];
-
-                return Array.isArray(item.timeseries) ? item.timeseries : [];
-            }
-
-            async function fetchGoogleWords(message) {
-                const results = [];
-
-                for (const query of message.queries || []) {
-                    try {
-                        const timeseries = await fetchGoogleSeries(query);
-                        results.push({
-                            key: query.key,
-                            word: query.word,
-                            corpus_id: query.corpus_id,
-                            corpus_name: query.corpus_name,
-                            timeseries,
-                        });
-                    } catch (error) {
-                        results.push({
-                            key: query.key,
-                            word: query.word,
-                            corpus_id: query.corpus_id,
-                            corpus_name: query.corpus_name,
-                            error: error.message || String(error),
-                            timeseries: [],
-                        });
-                    }
-                }
-
-                return { results };
-            }
-
-            async function fetchGoogleTermsPmw(message) {
-                const terms = (message.terms || [])
-                    .map(function (term) { return String(term).trim(); })
-                    .filter(Boolean);
-
-                if (terms.length === 0) {
-                    return { rows: [] };
-                }
-
-                const years = [];
-                for (let year = Number(message.year_start); year <= Number(message.year_end); year += 1) {
-                    years.push(year);
-                }
-
-                const rows = [];
-
-                for (const term of terms) {
-                    const values = await fetchGoogleSeries({
-                        word: term,
-                        year_start: message.year_start,
-                        year_end: message.year_end,
-                        corpus: message.corpus,
-                        smoothing: message.smoothing || 0,
-                    });
-
-                    values.forEach(function (value, index) {
-                        if (index < years.length) {
-                            rows.push({
-                                term,
-                                year: years[index],
-                                frequency: Math.round(Number(value) * PMW_MULTIPLIER * 100) / 100,
-                            });
-                        }
-                    });
-                }
-
-                return { rows };
             }
 
             async function fetchDatamuseSynonyms(message) {
@@ -366,11 +271,7 @@ app_ui = ui.page_fluid(
                 try {
                     let data;
 
-                    if (message.kind === "google_words") {
-                        data = await fetchGoogleWords(message);
-                    } else if (message.kind === "google_terms_pmw") {
-                        data = await fetchGoogleTermsPmw(message);
-                    } else if (message.kind === "datamuse_synonyms") {
+                    if (message.kind === "datamuse_synonyms") {
                         data = await fetchDatamuseSynonyms(message);
                     } else if (message.kind === "datamuse_inflections") {
                         data = await fetchDatamuseInflections(message);

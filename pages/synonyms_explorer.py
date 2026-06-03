@@ -11,6 +11,7 @@ from utils import (
     build_ngram_group_mean_df,
     build_ngram_wide_df,
     clean_lower_terms,
+    fetch_google_ngram_pmw,
     parse_client_api_payload,
     read_lower_terms_from_excel,
     read_lower_terms_from_txt,
@@ -249,7 +250,6 @@ def synonyms_explorer_server(input, output, session, shared):
     ngram_data = reactive.Value(pd.DataFrame())
     candidate_synonyms = reactive.Value([])
     pending_datamuse_request = reactive.Value(None)
-    pending_ngram_request = reactive.Value(None)
 
     def clean_terms_from_text(lines: str) -> list[str]:
         terms = [
@@ -415,7 +415,7 @@ def synonyms_explorer_server(input, output, session, shared):
 
     @reactive.effect
     @reactive.event(input.syn_fetch)
-    async def _fetch_ngram_data():
+    def _fetch_ngram_data():
         terms = selected_terms_for_fetch()
 
         if not terms:
@@ -426,21 +426,22 @@ def synonyms_explorer_server(input, output, session, shared):
             ngram_data.set(pd.DataFrame({"error": ["Use max 12 words at once."]}))
             return
 
-        request_id = uuid.uuid4().hex
-        pending_ngram_request.set(request_id)
-        await session.send_custom_message(
-            "client_api_request",
-            {
-                "request_id": request_id,
-                "target": "synonyms_ngram",
-                "kind": "google_terms_pmw",
-                "terms": terms,
-                "year_start": int(input.syn_year_start()),
-                "year_end": int(input.syn_year_end()),
-                "corpus": input.syn_corpus(),
-                "smoothing": int(input.syn_smoothing()),
-            },
-        )
+        try:
+            df = fetch_google_ngram_pmw(
+                terms=terms,
+                year_start=int(input.syn_year_start()),
+                year_end=int(input.syn_year_end()),
+                corpus=input.syn_corpus(),
+                smoothing=int(input.syn_smoothing()),
+            )
+        except Exception as exc:
+            ngram_data.set(pd.DataFrame({"error": [f"Could not fetch Google Ngram data: {exc}"]}))
+            return
+
+        if df.empty:
+            ngram_data.set(pd.DataFrame({"error": ["No data returned from Google Ngram."]}))
+        else:
+            ngram_data.set(df)
 
     @reactive.effect
     @reactive.event(input.client_api_response)
@@ -459,21 +460,6 @@ def synonyms_explorer_server(input, output, session, shared):
 
             candidate_synonyms.set(clean_lower_terms(payload.get("words", [])))
             return
-
-        if target == "synonyms_ngram":
-            if payload.get("request_id") != pending_ngram_request():
-                return
-
-            if payload.get("error"):
-                ngram_data.set(pd.DataFrame({"error": [payload["error"]]}))
-                return
-
-            df = pd.DataFrame(payload.get("rows", []))
-
-            if df.empty:
-                ngram_data.set(pd.DataFrame({"error": ["No data returned from Google Ngram."]}))
-            else:
-                ngram_data.set(df)
 
     @reactive.calc
     def wide_df_data():
