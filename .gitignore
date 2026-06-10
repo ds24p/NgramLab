@@ -1,1 +1,5 @@
 rsconnect-python/
+_site/
+_shinylive_app/
+.shinylive/
+shinylive-cache/

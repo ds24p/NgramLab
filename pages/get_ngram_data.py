@@ -3,6 +3,7 @@ import pandas as pd
 
 from utils import (
     fetch_ngram_timeseries,
+    get_ngram_proxy_url,
     parse_manual_words,
     read_word_list_from_excel,
     read_word_list_from_txt,
@@ -87,6 +88,8 @@ def get_ngram_data_ui():
                             "27": "American English 2019",
                             "28": "British English 2019",
                             "29": "English Fiction 2019",
+                            "ger_2019": "German 2019",
+                            "ita_2019": "Italian 2019",
                         },
                         selected="26"
                     ),
@@ -169,7 +172,7 @@ def get_ngram_data_server(input, output, session, shared):
             status_text.set("Start year cannot be greater than end year.")
             return
 
-        corpus = int(input.corpus())
+        corpus = input.corpus()
         convert_to_pmw = bool(input.convert_to_pmw())
 
         scale = (
@@ -184,6 +187,7 @@ def get_ngram_data_server(input, output, session, shared):
 
         rows = []
         errors = []
+        proxy_url = get_ngram_proxy_url(input)
 
         for word in words:
             row = {"word": word}
@@ -196,6 +200,7 @@ def get_ngram_data_server(input, output, session, shared):
                     corpus=corpus,
                     smoothing=0,
                     case_insensitive=False,
+                    proxy_url=proxy_url,
                 )
             except Exception as exc:
                 errors.append(f"{word}: {exc}")
@@ -232,7 +237,11 @@ def get_ngram_data_server(input, output, session, shared):
 
         choices = sorted(set(df["word"].dropna().unique().tolist() + [REFERENCE_WORD]))
 
-        selected = input.selected_word()
+        try:
+            selected = input.selected_word()
+        except Exception:
+            selected = []
+
         if selected is None:
             selected = []
         elif isinstance(selected, str):

@@ -30,12 +30,24 @@ REFERENCE_WORD = "the"
 DEFAULT_REFERENCE_YEARS = list(range(1901, 2001))
 
 
+def explorer_word_choices(shared=None):
+    df = shared.get("uploaded_df") if shared else None
+
+    if df is None or df.empty or "word" not in df.columns:
+        return [REFERENCE_WORD]
+
+    words = df["word"].dropna().astype(str).tolist()
+    return sorted(set(words + [REFERENCE_WORD]), key=str.casefold)
+
+
 def default_reference_values():
     x = np.linspace(0, 1, len(DEFAULT_REFERENCE_YEARS))
     return (0.6 + 0.6 * x + 0.05 * np.sin(4 * np.pi * x)).tolist()
 
 
-def explorer_ui():
+def explorer_ui(shared=None):
+    word_choices = explorer_word_choices(shared)
+
     return ui.div(
         ui.div(
             ui.div("Explorer", class_="page-title"),
@@ -66,7 +78,7 @@ def explorer_ui():
             ui.input_selectize(
                 "selected_word",
                 "Choose up to 5 words",
-                choices=[REFERENCE_WORD],
+                choices=word_choices,
                 selected=[REFERENCE_WORD],
                 multiple=True,
                 options={
@@ -135,7 +147,7 @@ def explorer_ui():
                     ),
                     class_="explorer-plot-scroll",
                 ),
-                class_="analysis-section"
+                class_="analysis-section explorer-chart-section"
             ),
 
             ui.div(
@@ -151,7 +163,7 @@ def explorer_ui():
                     ),
                     class_="explorer-plot-scroll",
                 ),
-                class_="analysis-section"
+                class_="analysis-section explorer-chart-section"
             ),
 
             ui.div(
@@ -167,7 +179,7 @@ def explorer_ui():
                     ),
                     class_="explorer-plot-scroll",
                 ),
-                class_="analysis-section"
+                class_="analysis-section explorer-chart-section"
             ),
 
             ui.div(
@@ -284,7 +296,10 @@ def explorer_server(input, output, session, shared):
         return fig
 
     def get_selected_words():
-        selected = input.selected_word()
+        try:
+            selected = input.selected_word()
+        except Exception:
+            return []
 
         if selected is None:
             return []
@@ -296,6 +311,24 @@ def explorer_server(input, output, session, shared):
 
     def analysis_has_run():
         return int(input.run_explorer_analysis() or 0) > 0
+
+    @reactive.effect
+    def _sync_selected_word_choices_from_shared_data():
+        choices = explorer_word_choices(shared)
+        selected = get_selected_words()
+        selected = [word for word in selected if word in choices]
+
+        if not selected:
+            selected = [REFERENCE_WORD]
+
+        try:
+            ui.update_selectize(
+                "selected_word",
+                choices=choices,
+                selected=selected[:5],
+            )
+        except Exception:
+            pass
 
     def use_z_score():
         return bool(input.use_z_score())

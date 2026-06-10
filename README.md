@@ -35,12 +35,14 @@ The tool combines:
 - Download word trajectories directly from Google Ngram
 - Support for multiple corpora:
   - English
-    - American English
-      - British English
-        - English Fiction
-        - Adjustable smoothing
-        - Case-insensitive search option
-        - Multi-word comparisons
+  - American English
+  - British English
+  - English Fiction
+  - German
+  - Italian
+- Adjustable smoothing
+- Case-insensitive search option
+- Multi-word comparisons
 
         ---
 
@@ -254,7 +256,51 @@ The tool combines:
 
         # Deployment
 
-        The application can be deployed using:
+        ## GitHub Pages with Shinylive
+
+        This repository includes a GitHub Actions workflow at
+        `.github/workflows/deploy-pages.yml` that exports the app with Shinylive
+        and deploys the generated static site to GitHub Pages.
+
+        1. Push the repository to GitHub.
+        2. In the repository settings, go to **Settings -> Pages**.
+        3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+        4. Push to `main` or `master`, or run the workflow manually from the
+           **Actions** tab.
+
+        Shinylive runs the Shiny app in the browser, so GitHub Pages only serves
+        static files and does not run a Python server.
+
+        Note: GitHub Pages cannot proxy server-side requests. If Google blocks
+        browser-side Ngram API requests because of CORS, use uploaded Excel/TXT
+        data in the analysis tabs or add a small CORS proxy/backend for live
+        Google Ngram downloads.
+
+        ## Optional Google Ngram CORS proxy
+
+        A Cloudflare Worker proxy template is included at
+        `proxy/cloudflare-worker.js`. Deploy it as a Cloudflare Worker, then open
+        the app settings menu and paste the Worker URL into **Google Ngram proxy
+        URL**.
+
+        The app will then request:
+
+        ```text
+        https://your-worker.workers.dev?content=test&year_start=1900&year_end=1901&corpus=26&smoothing=0
+        ```
+
+        The Worker forwards the request to Google Ngram and adds CORS headers so
+        the GitHub Pages/Shinylive app can read the response.
+
+        To build the static site locally after installing `shinylive`, run:
+
+        ```bash
+        python scripts/build_shinylive.py
+        ```
+
+        The generated site will be written to `_site/`.
+
+        Other deployment options:
 
         - shinyapps.io
         - local servers

@@ -9,9 +9,18 @@ import urllib.request
 import pandas as pd
 import numpy as np
 
+try:
+    import pyodide_http
+except ImportError:
+    pyodide_http = None
+
+if pyodide_http is not None:
+    pyodide_http.patch_all()
+
 
 PMW_MULTIPLIER = 1_000_000
 PMW_LABEL = "per million words (PMW)"
+GOOGLE_NGRAM_JSON_URL = "https://books.google.com/ngrams/json"
 
 
 def year_columns(df: pd.DataFrame) -> list[int]:
@@ -234,21 +243,51 @@ def read_lower_terms_from_excel(path: str) -> list[str]:
     return clean_lower_terms(read_word_list_from_excel(path))
 
 
+def normalize_ngram_proxy_url(proxy_url: str | None) -> str:
+    proxy_url = str(proxy_url or "").strip()
+
+    if not proxy_url:
+        return ""
+
+    return proxy_url.rstrip("?&")
+
+
+def get_ngram_proxy_url(input_obj) -> str:
+    try:
+        return normalize_ngram_proxy_url(input_obj.ngram_proxy_url())
+    except Exception:
+        return ""
+
+
+def build_ngram_request_url(params: dict, proxy_url: str | None = None) -> str:
+    query = urllib.parse.urlencode(params)
+    proxy_url = normalize_ngram_proxy_url(proxy_url)
+
+    if proxy_url:
+        separator = "&" if "?" in proxy_url else "?"
+        return proxy_url + separator + query
+
+    return GOOGLE_NGRAM_JSON_URL + "?" + query
+
+
 def _read_json_url(url: str, timeout: int = 30):
     max_retries = 6
     backoff_base = 1.0
 
     for attempt in range(1, max_retries + 1):
         try:
+            headers = {}
+
+            if pyodide_http is None:
+                headers["User-Agent"] = (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/125.0 Safari/537.36"
+                )
+
             req = urllib.request.Request(
                 url,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/125.0 Safari/537.36"
-                    )
-                },
+                headers=headers,
             )
 
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -278,9 +317,10 @@ def _fetch_ngram_timeseries_cached(
     word: str,
     year_start: int,
     year_end: int,
-    corpus: int,
+    corpus: str,
     smoothing: int,
     case_insensitive: bool,
+    proxy_url: str,
     timeout: int,
 ) -> tuple[float, ...]:
     params = {
@@ -294,7 +334,7 @@ def _fetch_ngram_timeseries_cached(
     if case_insensitive:
         params["case_insensitive"] = "on"
 
-    url = "https://books.google.com/ngrams/json?" + urllib.parse.urlencode(params)
+    url = build_ngram_request_url(params, proxy_url)
     data = _read_json_url(url, timeout=timeout)
 
     if not data:
@@ -321,18 +361,20 @@ def fetch_ngram_timeseries(
     word: str,
     year_start: int,
     year_end: int,
-    corpus: int,
+    corpus: int | str,
     smoothing: int = 0,
     case_insensitive: bool = False,
+    proxy_url: str | None = None,
     timeout: int = 30,
 ):
     ts = _fetch_ngram_timeseries_cached(
         str(word),
         int(year_start),
         int(year_end),
-        int(corpus),
+        str(corpus),
         int(smoothing),
         bool(case_insensitive),
+        normalize_ngram_proxy_url(proxy_url),
         int(timeout),
     )
     return list(ts)
@@ -345,20 +387,19 @@ def _fetch_google_ngram_pmw_rows_cached(
     year_end: int,
     corpus: str,
     smoothing: int,
+    proxy_url: str,
     timeout: int,
 ) -> tuple[tuple[str, int, float], ...]:
     query = ",".join(terms)
-    url = (
-        "https://books.google.com/ngrams/json?"
-        + urllib.parse.urlencode(
-            {
-                "content": query,
-                "year_start": year_start,
-                "year_end": year_end,
-                "corpus": corpus,
-                "smoothing": smoothing,
-            }
-        )
+    url = build_ngram_request_url(
+        {
+            "content": query,
+            "year_start": year_start,
+            "year_end": year_end,
+            "corpus": corpus,
+            "smoothing": smoothing,
+        },
+        proxy_url,
     )
 
     data = _read_json_url(url, timeout=timeout)
@@ -387,6 +428,7 @@ def fetch_google_ngram_pmw(
     year_end: int,
     corpus: str,
     smoothing: int,
+    proxy_url: str | None = None,
     timeout: int = 30,
 ) -> pd.DataFrame:
     clean = tuple(t.strip() for t in terms if str(t).strip())
@@ -400,6 +442,7 @@ def fetch_google_ngram_pmw(
         int(year_end),
         str(corpus),
         int(smoothing),
+        normalize_ngram_proxy_url(proxy_url),
         int(timeout),
     )
 
