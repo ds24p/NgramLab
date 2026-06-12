@@ -271,6 +271,12 @@ The tool combines:
         Shinylive runs the Shiny app in the browser, so GitHub Pages only serves
         static files and does not run a Python server.
 
+        Routing uses GitHub Pages-friendly paths. The tabs resolve to addresses
+        such as `https://your-user.github.io/your-repo/explorer/`. The build
+        generates static route pages like `explorer/index.html` and a
+        `404.html` fallback for older or mistyped route URLs. Old hash links
+        such as `/#/explorer` still open and are converted to the matching path.
+
         Note: GitHub Pages cannot proxy server-side requests. If Google blocks
         browser-side Ngram API requests because of CORS, use uploaded Excel/TXT
         data in the analysis tabs or add a small CORS proxy/backend for live
