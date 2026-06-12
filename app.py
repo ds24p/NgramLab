@@ -65,15 +65,6 @@ ROUTES = [
 ]
 
 ROUTE_BY_PATH = {route["path"]: route for route in ROUTES}
-ROUTE_ALIASES = {
-    "": "/fetcher",
-    "/": "/fetcher",
-    "/ngram-data": "/fetcher",
-    "/ngram-data-fetcher": "/fetcher",
-    "/compare": "/compare-corpora",
-    "/cross-corpus-analysis": "/cross-corpus",
-}
-
 APP_SHARED_DATA = {
     "uploaded_df": None,
     "uploaded_years": [],
@@ -86,18 +77,11 @@ def normalize_route_path(path):
         return "/fetcher"
 
     path = "/" + str(path).strip("/")
-    path = ROUTE_ALIASES.get(path, path)
 
     if path not in ROUTE_BY_PATH:
         return "/fetcher"
 
     return path
-
-
-def route_for_request(request):
-    url = getattr(request, "url", None)
-    path = getattr(url, "path", "/fetcher")
-    return ROUTE_BY_PATH[normalize_route_path(path)]
 
 
 def common_head():
@@ -117,13 +101,7 @@ def common_head():
                     "/synonyms",
                     "/inflections"
                 ]);
-                const routeAliases = {
-                    "/": "/fetcher",
-                    "/ngram-data": "/fetcher",
-                    "/ngram-data-fetcher": "/fetcher",
-                    "/compare": "/compare-corpora",
-                    "/cross-corpus-analysis": "/cross-corpus"
-                };
+                let activeRoute = "/fetcher";
                 const tabDescriptions = {
                     "Ngram Data Fetcher": "Download Google Ngram data or upload word-year files.",
                     "Explorer": "Explore word trajectories, AUC values, peaks and trends.",
@@ -167,34 +145,27 @@ def common_head():
                 }
 
                 function normalizeClientRoute(route) {
-                    route = "/" + String(route || "").replace(/^#?\\/?/, "").replace(/\\/+$/, "");
+                    route = "/" + String(route || "").replace(/^\\/?/, "").replace(/\\/+$/, "");
 
                     if (route === "/") {
                         return "/fetcher";
                     }
 
-                    route = routeAliases[route] || route;
-
                     return routePaths.has(route) ? route : "/fetcher";
                 }
 
-                function routeFromHash() {
-                    const hash = window.location.hash || "#/fetcher";
-                    return normalizeClientRoute(hash.replace(/^#/, ""));
-                }
-
-                function syncRoute() {
-                    const route = routeFromHash();
+                function setActiveRoute(route) {
+                    activeRoute = normalizeClientRoute(route);
 
                     document.querySelectorAll(".route-nav .nav-link").forEach(function (tab) {
-                        const isActive = tab.dataset.route === route;
+                        const isActive = tab.dataset.route === activeRoute;
                         tab.classList.toggle("active", isActive);
                     });
 
                     if (window.Shiny && window.Shiny.setInputValue) {
                         window.Shiny.setInputValue(
                             "active_route",
-                            route,
+                            activeRoute,
                             { priority: "event" }
                         );
                     }
@@ -268,14 +239,12 @@ def common_head():
                     if (active) {
                         const activeLabel = active.textContent.trim();
                         if (newHere && (activeLabel === "Synonyms" || activeLabel === "Inflections")) {
-                            window.location.hash = "#/fetcher";
-                            syncRoute();
+                            setActiveRoute("/fetcher");
                         }
                     }
                 }
 
                 decorateTabs();
-                window.addEventListener("hashchange", syncRoute);
 
                 if (mobileNavToggle) {
                     mobileNavToggle.addEventListener("click", function (event) {
@@ -285,8 +254,12 @@ def common_head():
                     });
                 }
 
-                if (!window.location.hash) {
-                    window.history.replaceState(null, "", "#/fetcher");
+                if (window.location.href.includes("#")) {
+                    window.history.replaceState(
+                        null,
+                        "",
+                        window.location.href.split("#")[0]
+                    );
                 }
 
                 document.addEventListener("click", function (event) {
@@ -301,6 +274,8 @@ def common_head():
                     const routeLink = target.closest(".route-nav .nav-link");
 
                     if (routeLink) {
+                        event.preventDefault();
+                        setActiveRoute(routeLink.dataset.route);
                         setMobileNavOpen(false);
                     }
 
@@ -343,7 +318,7 @@ def common_head():
                 });
 
                 syncInfoButtonState();
-                syncRoute();
+                setActiveRoute(activeRoute);
                 setTimeout(updateMode, 300);
             });
             """
@@ -533,7 +508,7 @@ def top_tools_ui():
                         href="https://ds24p.github.io/personal_website/",
                         target="_blank",
                     ),
-                    ui.a("Related papers", href="#"),
+                    ui.span("Related papers", class_="dropdown-muted-link"),
                     class_="dropdown-card",
                 ),
                 class_="uni-dropdown",
@@ -589,9 +564,9 @@ def navigation_ui():
     for route in ROUTES:
         links.append(
             ui.tags.li(
-                ui.a(
+                ui.tags.button(
                     route["label"],
-                    href=f"#{route['path']}",
+                    type="button",
                     class_="nav-link",
                     **{
                         "data-route": route["path"],

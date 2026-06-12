@@ -273,6 +273,7 @@ def explorer_ui(shared=None):
 
 
 def explorer_server(input, output, session, shared):
+    analysis_state = reactive.Value(None)
 
     def empty_figure(message):
         fig = go.Figure()
@@ -310,7 +311,10 @@ def explorer_server(input, output, session, shared):
         return list(selected)[:5]
 
     def analysis_has_run():
-        return int(input.run_explorer_analysis() or 0) > 0
+        return analysis_state.get() is not None
+
+    def current_analysis():
+        return analysis_state.get()
 
     @reactive.effect
     def _sync_selected_word_choices_from_shared_data():
@@ -330,13 +334,13 @@ def explorer_server(input, output, session, shared):
         except Exception:
             pass
 
-    def use_z_score():
+    def live_use_z_score():
         return bool(input.use_z_score())
 
-    def use_smoothing():
+    def live_use_smoothing():
         return bool(input.apply_smoothing())
 
-    def smoothing_window():
+    def live_smoothing_window():
         value = input.smoothing_window()
 
         if value is None:
@@ -346,6 +350,31 @@ def explorer_server(input, output, session, shared):
             return max(1, int(value))
         except (TypeError, ValueError):
             return 3
+
+    def use_z_score():
+        state = current_analysis()
+        return bool(state["use_z_score"]) if state else False
+
+    def use_smoothing():
+        state = current_analysis()
+        return bool(state["apply_smoothing"]) if state else False
+
+    def smoothing_window():
+        state = current_analysis()
+        return int(state["smoothing_window"]) if state else 3
+
+    @reactive.effect
+    @reactive.event(input.run_explorer_analysis)
+    def _capture_explorer_analysis():
+        if int(input.run_explorer_analysis() or 0) <= 0:
+            return
+
+        analysis_state.set({
+            "selected_words": get_selected_words(),
+            "use_z_score": live_use_z_score(),
+            "apply_smoothing": live_use_smoothing(),
+            "smoothing_window": live_smoothing_window(),
+        })
 
     def active_scale_label():
         smoothing_note = ""
@@ -358,6 +387,9 @@ def explorer_server(input, output, session, shared):
         return (shared.get("uploaded_scale", "raw score") or "raw score") + smoothing_note
 
     def score_note():
+        if not analysis_has_run():
+            return "Click Run analysis to update results."
+
         scale_part = "z-score results" if use_z_score() else "raw score"
 
         if use_smoothing():
@@ -432,7 +464,12 @@ def explorer_server(input, output, session, shared):
     def get_selected_data():
         df = shared["uploaded_df"]
         years = shared["uploaded_years"]
-        words = get_selected_words()
+        state = current_analysis()
+
+        if state is None:
+            return None, [], []
+
+        words = list(state["selected_words"])
 
         if (df is None or df.empty or not years) and words == [REFERENCE_WORD]:
             years = DEFAULT_REFERENCE_YEARS
@@ -452,7 +489,7 @@ def explorer_server(input, output, session, shared):
 
         selected_words = list(words)
 
-        if not analysis_has_run() and not selected_words:
+        if not selected_words:
             return None, [], []
 
         selected_df = df[df["word"].isin(selected_words)].copy()
@@ -826,7 +863,7 @@ def explorer_server(input, output, session, shared):
         return build_yearly_df()
 
     @reactive.effect
-    @reactive.event(input.run_explorer_analysis, input.selected_word)
+    @reactive.event(input.run_explorer_analysis)
     def _sync_segmented_word_filter_choices():
         if not analysis_has_run():
             ui.update_selectize(
