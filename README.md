@@ -44,9 +44,9 @@ The tool combines:
 - Case-insensitive search option
 - Multi-word comparisons
 
-        ---
+---
 
-        ## 2. Explorer
+  ## 2. Explorer
 
         Interactive analysis environment for uploaded datasets.
 
@@ -66,7 +66,7 @@ The tool combines:
 
         ---
 
-        ## 3. Synonyms Explorer
+  ## 3. Synonyms Explorer
 
         Allows exploration of semantically related words.
 
@@ -82,7 +82,7 @@ The tool combines:
 
         ---
 
-        ## 4. Inflections Explorer
+  ## 4. Inflections Explorer
 
         Morphological expansion utilities for:
 
@@ -95,7 +95,7 @@ The tool combines:
 
         ---
 
-        ## 5. Cross-Corpus Analysis
+  ## 5. Cross-Corpus Analysis
 
         Compare multiple corpora simultaneously.
 
@@ -116,7 +116,7 @@ The tool combines:
 
         ---
 
-        ## 6. Excel Export
+  ## 6. Excel Export
 
         Generate structured Excel reports containing:
 
@@ -130,7 +130,7 @@ The tool combines:
 
         ---
 
-        # Data Format
+  # Data Format
 
         Input datasets should follow a simple matrix structure:
 
@@ -148,9 +148,9 @@ The tool combines:
 
         ---
 
-        # Technologies Used
+  # Technologies Used
 
-        ## Core Stack
+      ## Core Stack
 
         - Python
         - Shiny for Python
@@ -235,83 +235,6 @@ The tool combines:
         - Michel et al. (2011), *Quantitative Analysis of Culture Using Millions of Digitized Books*
         - Younes & Reips (2019), *Guideline for improving the reliability of Google Ngram studies*
         - research on corpus validation and psychological trend analysis
-
-        ---
-
-        # Running the Application
-
-        ## Install dependencies
-
-        ```bash
-        pip install shiny pandas numpy scipy plotly openpyxl shinywidgets matplotlib
-        ```
-
-        ## Run locally
-
-        ```bash
-        shiny run app.py
-        ```
-
-        ---
-
-        # Deployment
-
-        ## GitHub Pages with Shinylive
-
-        This repository includes a GitHub Actions workflow at
-        `.github/workflows/deploy-pages.yml` that exports the app with Shinylive
-        and deploys the generated static site to GitHub Pages.
-
-        1. Push the repository to GitHub.
-        2. In the repository settings, go to **Settings -> Pages**.
-        3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-        4. Push to `main` or `master`, or run the workflow manually from the
-           **Actions** tab.
-
-        Shinylive runs the Shiny app in the browser, so GitHub Pages only serves
-        static files and does not run a Python server.
-
-        Routing uses GitHub Pages-friendly paths. The tabs resolve to addresses
-        such as `https://your-user.github.io/your-repo/explorer/`. The build
-        generates static route pages like `explorer/index.html` and a
-        `404.html` fallback for older or mistyped route URLs. Old hash links
-        such as `/#/explorer` still open and are converted to the matching path.
-
-        Note: GitHub Pages cannot proxy server-side requests. If Google blocks
-        browser-side Ngram API requests because of CORS, use uploaded Excel/TXT
-        data in the analysis tabs or add a small CORS proxy/backend for live
-        Google Ngram downloads.
-
-        ## Optional Google Ngram CORS proxy
-
-        A Cloudflare Worker proxy template is included at
-        `proxy/cloudflare-worker.js`. Deploy it as a Cloudflare Worker, then open
-        the app settings menu and paste the Worker URL into **Google Ngram proxy
-        URL**.
-
-        The app will then request:
-
-        ```text
-        https://your-worker.workers.dev?content=test&year_start=1900&year_end=1901&corpus=26&smoothing=0
-        ```
-
-        The Worker forwards the request to Google Ngram and adds CORS headers so
-        the GitHub Pages/Shinylive app can read the response.
-
-        To build the static site locally after installing `shinylive`, run:
-
-        ```bash
-        python scripts/build_shinylive.py
-        ```
-
-        The generated site will be written to `_site/`.
-
-        Other deployment options:
-
-        - shinyapps.io
-        - local servers
-        - institutional servers
-        - Docker environments
 
         ---
 
