@@ -256,59 +256,61 @@ The tool combines:
 
         # Deployment
 
-        ## GitHub Pages with Shinylive
+        ## shinyapps.io
 
-        This repository includes a GitHub Actions workflow at
-        `.github/workflows/deploy-pages.yml` that exports the app with Shinylive
-        and deploys the generated static site to GitHub Pages.
+        The `shinyapps` branch is prepared for server-side deployment to
+        shinyapps.io with `rsconnect-python`. It is a single Shiny for Python
+        app at one shinyapps.io URL; tabs are handled inside the app and do not
+        create separate server routes like `/explorer/`.
 
-        1. Push the repository to GitHub.
-        2. In the repository settings, go to **Settings -> Pages**.
-        3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-        4. Push to `main` or `master`, or run the workflow manually from the
-           **Actions** tab.
-
-        Shinylive runs the Shiny app in the browser, so GitHub Pages only serves
-        static files and does not run a Python server.
-
-        Routing uses GitHub Pages-friendly paths. The tabs resolve to addresses
-        such as `https://your-user.github.io/your-repo/explorer/`. The build
-        generates static route pages like `explorer/index.html` and a
-        `404.html` fallback for older or mistyped route URLs. Old hash links
-        such as `/#/explorer` still open and are converted to the matching path.
-
-        Note: GitHub Pages cannot proxy server-side requests. If Google blocks
-        browser-side Ngram API requests because of CORS, use uploaded Excel/TXT
-        data in the analysis tabs or add a small CORS proxy/backend for live
-        Google Ngram downloads.
-
-        ## Optional Google Ngram CORS proxy
-
-        A Cloudflare Worker proxy template is included at
-        `proxy/cloudflare-worker.js`. Deploy it as a Cloudflare Worker, then open
-        the app settings menu and paste the Worker URL into **Google Ngram proxy
-        URL**.
-
-        The app will then request:
-
-        ```text
-        https://your-worker.workers.dev?content=test&year_start=1900&year_end=1901&corpus=26&smoothing=0
-        ```
-
-        The Worker forwards the request to Google Ngram and adds CORS headers so
-        the GitHub Pages/Shinylive app can read the response.
-
-        To build the static site locally after installing `shinylive`, run:
+        Install the deployment tool locally:
 
         ```bash
-        python scripts/build_shinylive.py
+        pip install rsconnect-python
         ```
 
-        The generated site will be written to `_site/`.
+        Add your shinyapps.io account once, using the token command from the
+        shinyapps.io dashboard:
+
+        ```bash
+        rsconnect add --account <ACCOUNT> --name <NAME> --token <TOKEN> --secret <SECRET>
+        ```
+
+        Deploy from this repository with:
+
+        ```powershell
+        .\scripts\deploy_shinyapps.ps1 -Name <NAME> -Title ngram-lab
+        ```
+
+        The script excludes local GitHub Pages/Shinylive build folders and other
+        files that are not needed on the shinyapps.io server. Or run the same
+        deployment directly:
+
+        ```powershell
+        rsconnect deploy shiny . `
+          --name <NAME> `
+          --title ngram-lab `
+          --override-python-version 3.12 `
+          --exclude ".github" `
+          --exclude "_site" `
+          --exclude "_shinylive_app" `
+          --exclude ".shinylive" `
+          --exclude "shinylive-cache" `
+          --exclude "rsconnect-python" `
+          --exclude "scripts/build_shinylive.py" `
+          --exclude "__pycache__" `
+          --exclude "*.pyc"
+        ```
+
+        The app dependencies are read from `requirements.txt`. The local
+        `.python-version` requests Python 3.12, which is supported by
+        shinyapps.io for Python Shiny deployments.
+
+        For the GitHub Pages/Shinylive multipage build, use the `multipages`
+        branch.
 
         Other deployment options:
 
-        - shinyapps.io
         - local servers
         - institutional servers
         - Docker environments

@@ -243,30 +243,8 @@ def read_lower_terms_from_excel(path: str) -> list[str]:
     return clean_lower_terms(read_word_list_from_excel(path))
 
 
-def normalize_ngram_proxy_url(proxy_url: str | None) -> str:
-    proxy_url = str(proxy_url or "").strip()
-
-    if not proxy_url:
-        return ""
-
-    return proxy_url.rstrip("?&")
-
-
-def get_ngram_proxy_url(input_obj) -> str:
-    try:
-        return normalize_ngram_proxy_url(input_obj.ngram_proxy_url())
-    except Exception:
-        return ""
-
-
-def build_ngram_request_url(params: dict, proxy_url: str | None = None) -> str:
+def build_ngram_request_url(params: dict) -> str:
     query = urllib.parse.urlencode(params)
-    proxy_url = normalize_ngram_proxy_url(proxy_url)
-
-    if proxy_url:
-        separator = "&" if "?" in proxy_url else "?"
-        return proxy_url + separator + query
-
     return GOOGLE_NGRAM_JSON_URL + "?" + query
 
 
@@ -320,7 +298,6 @@ def _fetch_ngram_timeseries_cached(
     corpus: str,
     smoothing: int,
     case_insensitive: bool,
-    proxy_url: str,
     timeout: int,
 ) -> tuple[float, ...]:
     params = {
@@ -334,7 +311,7 @@ def _fetch_ngram_timeseries_cached(
     if case_insensitive:
         params["case_insensitive"] = "on"
 
-    url = build_ngram_request_url(params, proxy_url)
+    url = build_ngram_request_url(params)
     data = _read_json_url(url, timeout=timeout)
 
     if not data:
@@ -364,7 +341,6 @@ def fetch_ngram_timeseries(
     corpus: int | str,
     smoothing: int = 0,
     case_insensitive: bool = False,
-    proxy_url: str | None = None,
     timeout: int = 30,
 ):
     ts = _fetch_ngram_timeseries_cached(
@@ -374,7 +350,6 @@ def fetch_ngram_timeseries(
         str(corpus),
         int(smoothing),
         bool(case_insensitive),
-        normalize_ngram_proxy_url(proxy_url),
         int(timeout),
     )
     return list(ts)
@@ -387,7 +362,6 @@ def _fetch_google_ngram_pmw_rows_cached(
     year_end: int,
     corpus: str,
     smoothing: int,
-    proxy_url: str,
     timeout: int,
 ) -> tuple[tuple[str, int, float], ...]:
     query = ",".join(terms)
@@ -399,7 +373,6 @@ def _fetch_google_ngram_pmw_rows_cached(
             "corpus": corpus,
             "smoothing": smoothing,
         },
-        proxy_url,
     )
 
     data = _read_json_url(url, timeout=timeout)
@@ -428,7 +401,6 @@ def fetch_google_ngram_pmw(
     year_end: int,
     corpus: str,
     smoothing: int,
-    proxy_url: str | None = None,
     timeout: int = 30,
 ) -> pd.DataFrame:
     clean = tuple(t.strip() for t in terms if str(t).strip())
@@ -442,7 +414,6 @@ def fetch_google_ngram_pmw(
         int(year_end),
         str(corpus),
         int(smoothing),
-        normalize_ngram_proxy_url(proxy_url),
         int(timeout),
     )
 

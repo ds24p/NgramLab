@@ -1,13 +1,6 @@
 from pathlib import Path
 
 from shiny import App, reactive, render, ui
-try:
-    from starlette.responses import HTMLResponse, RedirectResponse
-    from starlette.routing import Route
-except ImportError:  # Shinylive/Pyodide can run without Starlette route redirects.
-    HTMLResponse = None
-    RedirectResponse = None
-    Route = None
 
 from pages.get_ngram_data import get_ngram_data_server, get_ngram_data_ui
 from pages.explorer import explorer_server, explorer_ui
@@ -185,81 +178,13 @@ def common_head():
                     return routePaths.has(route) ? route : "/fetcher";
                 }
 
-                function routeSegmentsFromPath() {
-                    return window.location.pathname.split("/").filter(Boolean);
-                }
-
-                function routeIndexFromSegments(segments) {
-                    for (let index = 0; index < segments.length; index += 1) {
-                        const candidate = normalizeClientRoute("/" + segments[index]);
-
-                        if (routePaths.has(candidate) && candidate !== "/fetcher") {
-                            return index;
-                        }
-
-                        if (segments[index] === "fetcher") {
-                            return index;
-                        }
-                    }
-
-                    return -1;
-                }
-
-                function appBasePath() {
-                    const segments = routeSegmentsFromPath();
-                    const routeIndex = routeIndexFromSegments(segments);
-
-                    if (routeIndex >= 0) {
-                        const baseSegments = segments.slice(0, routeIndex);
-                        return "/" + (baseSegments.length ? baseSegments.join("/") + "/" : "");
-                    }
-
-                    if (window.location.hostname.endsWith(".github.io") && segments.length >= 1) {
-                        return "/" + segments[0] + "/";
-                    }
-
-                    return "/";
-                }
-
-                function urlForRoute(route) {
-                    route = normalizeClientRoute(route);
-                    const base = appBasePath();
-                    const routeName = route.replace(/^\\//, "");
-
-                    if (route === "/fetcher") {
-                        return base + "fetcher/";
-                    }
-
-                    return base + routeName + "/";
-                }
-
-                function routeFromLocation() {
-                    const hash = window.location.hash || "";
-
-                    if (hash.startsWith("#/")) {
-                        const route = normalizeClientRoute(hash.slice(1));
-                        window.history.replaceState(null, "", urlForRoute(route));
-                        return route;
-                    }
-
-                    const segments = routeSegmentsFromPath();
-                    const routeIndex = routeIndexFromSegments(segments);
-
-                    if (routeIndex >= 0) {
-                        return normalizeClientRoute("/" + segments[routeIndex]);
-                    }
-
-                    return "/fetcher";
-                }
-
-                function decorateRouteLinks() {
-                    document.querySelectorAll(".route-nav .nav-link").forEach(function (tab) {
-                        tab.setAttribute("href", urlForRoute(tab.dataset.route));
-                    });
+                function routeFromHash() {
+                    const hash = window.location.hash || "#/fetcher";
+                    return normalizeClientRoute(hash.replace(/^#/, ""));
                 }
 
                 function syncRoute() {
-                    const route = routeFromLocation();
+                    const route = routeFromHash();
 
                     document.querySelectorAll(".route-nav .nav-link").forEach(function (tab) {
                         const isActive = tab.dataset.route === route;
@@ -343,15 +268,13 @@ def common_head():
                     if (active) {
                         const activeLabel = active.textContent.trim();
                         if (newHere && (activeLabel === "Synonyms" || activeLabel === "Inflections")) {
-                            window.history.pushState(null, "", urlForRoute("/fetcher"));
+                            window.location.hash = "#/fetcher";
                             syncRoute();
                         }
                     }
                 }
 
                 decorateTabs();
-                decorateRouteLinks();
-                window.addEventListener("popstate", syncRoute);
                 window.addEventListener("hashchange", syncRoute);
 
                 if (mobileNavToggle) {
@@ -362,8 +285,8 @@ def common_head():
                     });
                 }
 
-                if (window.location.hash && window.location.hash.startsWith("#/")) {
-                    syncRoute();
+                if (!window.location.hash) {
+                    window.history.replaceState(null, "", "#/fetcher");
                 }
 
                 document.addEventListener("click", function (event) {
@@ -378,9 +301,6 @@ def common_head():
                     const routeLink = target.closest(".route-nav .nav-link");
 
                     if (routeLink) {
-                        event.preventDefault();
-                        window.history.pushState(null, "", urlForRoute(routeLink.dataset.route));
-                        syncRoute();
                         setMobileNavOpen(false);
                     }
 
@@ -585,15 +505,6 @@ def top_tools_ui():
                         choices=["New here", "Advanced user"],
                         selected="Advanced user",
                     ),
-                    ui.input_text(
-                        "ngram_proxy_url",
-                        "Google Ngram proxy URL",
-                        placeholder="https://your-worker.workers.dev",
-                    ),
-                    ui.p(
-                        "Optional. Leave empty for direct Google Ngram requests.",
-                        class_="muted proxy-help",
-                    ),
                     class_="dropdown-card",
                 ),
                 class_="tool-dropdown",
@@ -680,7 +591,7 @@ def navigation_ui():
             ui.tags.li(
                 ui.a(
                     route["label"],
-                    href=f"{route['path'].lstrip('/')}/",
+                    href=f"#{route['path']}",
                     class_="nav-link",
                     **{
                         "data-route": route["path"],
@@ -806,74 +717,6 @@ app = App(
     server,
     static_assets=Path(__file__).parent / "www",
 )
-
-
-if HTMLResponse is not None and RedirectResponse is not None and Route is not None:
-    root_request_route = next(
-        (
-            route
-            for route in app.starlette_app.routes
-            if getattr(route, "path", None) == "/"
-        ),
-        None,
-    )
-
-    def add_base_tag(html, href="/"):
-        return html.replace("<head>", f'<head>\n    <base href="{href}" />', 1)
-
-
-    async def route_page(request):
-        response = await root_request_route.endpoint(request)
-        html = response.body.decode("utf-8")
-
-        return HTMLResponse(
-            content=add_base_tag(html),
-            status_code=response.status_code,
-        )
-
-
-    def route_redirect(request):
-        route_path = normalize_route_path(request.url.path)
-        query = request.url.query
-        target = f"{route_path}/"
-
-        if query:
-            target = f"{target}?{query}"
-
-        return RedirectResponse(url=target, status_code=302)
-
-
-    page_routes = []
-
-    if root_request_route is not None:
-        page_routes = [
-            Route(f"{route['path']}/", route_page, methods=["GET"])
-            for route in ROUTES
-        ]
-
-    redirect_routes = [
-        Route(route["path"], route_redirect, methods=["GET"])
-        for route in ROUTES
-    ]
-
-    for alias in ROUTE_ALIASES:
-        if alias in ("", "/"):
-            continue
-
-        redirect_routes.append(Route(alias, route_redirect, methods=["GET"]))
-        redirect_routes.append(Route(f"{alias}/", route_redirect, methods=["GET"]))
-
-    static_mount_index = next(
-        (
-            index
-            for index, route in enumerate(app.starlette_app.routes)
-            if getattr(route, "path", None) == ""
-        ),
-        len(app.starlette_app.routes),
-    )
-    app.starlette_app.routes[static_mount_index:static_mount_index] = (
-        page_routes + redirect_routes
-    )
 
 
 if __name__ == "__main__":

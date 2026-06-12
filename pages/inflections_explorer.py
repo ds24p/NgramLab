@@ -12,7 +12,6 @@ from utils import (
     build_ngram_wide_df,
     clean_lower_terms,
     fetch_google_ngram_pmw,
-    get_ngram_proxy_url,
     parse_client_api_payload,
     read_lower_terms_from_excel,
     read_lower_terms_from_txt,
@@ -451,7 +450,6 @@ def inflections_explorer_server(input_, output, session, _shared):
                 year_end=int(input_.infl_year_end()),
                 corpus=input_.infl_corpus(),
                 smoothing=int(input_.infl_smoothing()),
-                proxy_url=get_ngram_proxy_url(input_),
             )
         except Exception as exc:
             ngram_data.set(pd.DataFrame({"error": [f"Could not fetch Google Ngram data: {exc}"]}))

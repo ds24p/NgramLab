@@ -3,7 +3,6 @@ import pandas as pd
 
 from utils import (
     fetch_ngram_timeseries,
-    get_ngram_proxy_url,
     parse_manual_words,
     read_word_list_from_excel,
     read_word_list_from_txt,
@@ -187,7 +186,6 @@ def get_ngram_data_server(input, output, session, shared):
 
         rows = []
         errors = []
-        proxy_url = get_ngram_proxy_url(input)
 
         for word in words:
             row = {"word": word}
@@ -200,7 +198,6 @@ def get_ngram_data_server(input, output, session, shared):
                     corpus=corpus,
                     smoothing=0,
                     case_insensitive=False,
-                    proxy_url=proxy_url,
                 )
             except Exception as exc:
                 errors.append(f"{word}: {exc}")

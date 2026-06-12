@@ -12,7 +12,6 @@ from utils import (
     build_ngram_wide_df,
     clean_lower_terms,
     fetch_google_ngram_pmw,
-    get_ngram_proxy_url,
     parse_client_api_payload,
     read_lower_terms_from_excel,
     read_lower_terms_from_txt,
@@ -422,7 +421,6 @@ def synonyms_explorer_server(input, output, session, shared):
                 year_end=int(input.syn_year_end()),
                 corpus=input.syn_corpus(),
                 smoothing=int(input.syn_smoothing()),
-                proxy_url=get_ngram_proxy_url(input),
             )
         except Exception as exc:
             ngram_data.set(pd.DataFrame({"error": [f"Could not fetch Google Ngram data: {exc}"]}))

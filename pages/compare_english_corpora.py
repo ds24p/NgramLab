@@ -8,7 +8,6 @@ from shinywidgets import output_widget, render_widget
 from utils import (
     auc_trapezoid,
     fetch_ngram_timeseries,
-    get_ngram_proxy_url,
     parse_manual_words,
     safe_corr,
     slope_per_year,
@@ -362,7 +361,6 @@ def get_compare_english_corpora_server(input, output, session, shared):
         years = list(range(year_start, year_end + 1))
         expected_len = len(years)
         yearly_rows = []
-        proxy_url = get_ngram_proxy_url(input)
 
         status_text.set(
             f"Downloading Google Ngram data for {len(words)} words "
@@ -379,7 +377,6 @@ def get_compare_english_corpora_server(input, output, session, shared):
                         corpus=int(corpus_id),
                         smoothing=smoothing,
                         case_insensitive=False,
-                        proxy_url=proxy_url,
                     )
                 except Exception as exc:
                     print(f"Error for {word} / {corpus_name}: {exc}")
