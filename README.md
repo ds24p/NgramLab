@@ -1,261 +1,214 @@
 # NGRAM LAB
 
-*A workspace for exploring Google Ngram data and cross-corpus word trends.*
+**A workspace for exploring Google Ngram data, cross-corpus trends, synonyms, and inflections.**
+
+NGRAM LAB is an interactive research tool built with **Python Shiny** for exploring historical word-frequency trajectories across multiple text corpora. It supports Google Ngram data retrieval, corpus comparison, statistical analysis, and exportable research outputs.
 
 ---
 
-# Overview
+## Features
 
-**NGRAM LAB** is an interactive Python-based application for exploring, visualizing, and comparing word frequency trajectories across multiple historical text corpora.
+### Google Ngram Retrieval
 
-The application was designed for research workflows involving:
-
-- Google Ngram datasets
-- corpus comparison
-- diachronic language analysis
-- psychological and cultural trend analysis
-- synonym and inflection exploration
-- trajectory-based statistical analysis
-
-The tool combines:
-
-- interactive visualizations
-- statistical summaries
-- AUC (Area Under the Curve) analysis
-- correlation analysis
-- cross-corpus comparisons
-- exportable research outputs
-
----
-
-# Main Features
-
-## 1. Google Ngram Data Retrieval
-
-- Download word trajectories directly from Google Ngram
-- Support for multiple corpora:
+- Direct access to Google Ngram trajectories
+- Multiple corpora support:
   - English
   - American English
   - British English
   - English Fiction
   - German
   - Italian
+- Case-insensitive search
+- Multi-word comparison
 - Adjustable smoothing
-- Case-insensitive search option
-- Multi-word comparisons
+
+### Explorer
+
+Interactive environment for trajectory analysis.
+
+**Includes:**
+
+- Trajectory plots
+- Indexed comparisons
+- AUC calculations
+- Segmented trend analysis
+- Peak-year detection
+- Correlation analysis
+- Correlation heatmaps
+- Z-score normalization
+- Summary statistics
+
+### Synonyms
+
+Analyze groups of semantically related words instead of single lexical items.
+
+**Features:**
+
+- Synonym group analysis
+- Mean trajectory computation
+- Group-level AUC calculations
+- Concept-level trend visualization
+
+This functionality follows methodological recommendations for improving the reliability of Google Ngram studies.
+
+### Inflections
+
+Explore:
+
+- Inflected forms
+- Derivational variants
+- Related word forms
+- Lemma-based expansions
+
+### Cross-Corpus Analysis
+
+Compare trajectories across multiple corpora.
+
+**Supported analyses:**
+
+- AUC comparison
+- Pearson correlation
+- Spearman correlation
+- Shared-year overlap analysis
+- Trajectory ranking
+- Statistical testing
+
+**Statistical tests:**
+
+- Welch's t-test
+- Mann–Whitney U test
+- Shapiro–Wilk normality test
+
+### Excel Export
+
+Generate structured Excel reports containing:
+
+- AUC tables
+- Rankings
+- Correlation matrices
+- Statistical summaries
+- Metadata
+- Trajectory comparison results
 
 ---
 
-  ## 2. Explorer
+## Data Format
 
-        Interactive analysis environment for uploaded datasets.
+Input files should be provided as Excel spreadsheets (`.xlsx`).
 
-        Includes:
+| word | 1900 | 1901 | 1902 |
+|------|------|------|------|
+| love | 12.3 | 12.1 | 11.8 |
+| war  | 8.2  | 8.6  | 9.1  |
 
-        - trajectory plots
-        - indexed comparisons
-        - AUC calculations
-        - segmented trend analysis
-        - peak year detection
-        - pairwise correlations
-        - correlation heatmaps
-        - z-score normalization
-        - summary statistics
+**Requirements**
 
-        Users can compare multiple words simultaneously and explore long-term frequency changes over time.
+- First column: word
+- Remaining columns: years
+- Values: word frequencies
+- File format: `.xlsx`
 
-        ---
+---
 
-  ## 3. Synonyms Explorer
+## Technology Stack
 
-        Allows exploration of semantically related words.
+### Core
 
-        Features include:
+- Python
+- Shiny for Python
+- Pandas
+- NumPy
+- SciPy
+- Plotly
+- OpenPyXL
 
-        - synonym group analysis
-        - mean trajectory computation
-        - group-level AUC calculations
-        - comparison of synonym trajectories
-        - visualization of conceptual trends instead of individual lexical items
+### Additional Libraries
 
-        This functionality was inspired by methodological recommendations regarding improved reliability of Google Ngram studies through synonym usage.
+- Matplotlib
+- shinywidgets
+- requests
+- urllib
 
-        ---
+---
 
-  ## 4. Inflections Explorer
+## Statistical Methods
 
-        Morphological expansion utilities for:
+### Area Under the Curve (AUC)
 
-        - inflections
-        - related forms
-        - derivational forms
-        - lemma-based variants
+NGRAM LAB estimates long-term word prevalence using trapezoidal integration:
 
-        Supports exploratory linguistic analysis and broader lexical coverage.
+```math
+AUC = \int_{t_0}^{t_n} f(t)\,dt
+```
 
-        ---
+### Correlation Analysis
 
-  ## 5. Cross-Corpus Analysis
+- Pearson correlation
+- Spearman correlation
+- Trajectory similarity analysis
 
-        Compare multiple corpora simultaneously.
+### Standardization
 
-        Supported workflows include:
+- Z-score normalization
+- Indexed trajectories
+- Shared-year filtering
+- Exclusion of zero-overlap years
 
-        - uploading multiple Excel datasets
-        - comparing AUC values across corpora
-        - computing Pearson/Spearman correlations
-        - ranking trajectories
-        - identifying shared-year overlaps
-        - statistical testing between corpora
+These procedures improve comparability between corpora with different scales and coverage.
 
-        The analysis pipeline supports:
+---
 
-        - Welch t-tests
-        - Mann–Whitney U tests
-        - Shapiro–Wilk normality tests
+## Research Motivation
 
-        ---
+Google Ngram data is widely used in:
 
-  ## 6. Excel Export
+- Digital humanities
+- Psychology
+- Linguistics
+- Cultural analytics
+- Computational social science
 
-        Generate structured Excel reports containing:
+However, historical corpora present methodological challenges such as:
 
-        - AUC tables
-        - rankings
-        - pairwise differences
-        - correlation matrices
-        - metadata
-        - statistical summaries
-        - trajectory comparison results
+- Changing corpus sizes
+- OCR artifacts
+- Semantic ambiguity
+- Dominance of high-frequency words
+- Uneven historical coverage
 
-        ---
+NGRAM LAB provides a transparent and reproducible environment for addressing these issues through interactive analysis and standardized workflows.
 
-  # Data Format
+---
 
-        Input datasets should follow a simple matrix structure:
+## Related Research
 
-        | word | 1900 | 1901 | 1902 | ... |
-        |------|------|------|------|------|
-        | love | 12.3 | 12.1 | 11.8 | ... |
-        | war  | 8.2  | 8.6  | 9.1  | ... |
+- Michel et al. (2011), *Quantitative Analysis of Culture Using Millions of Digitized Books*
+- Younes & Reips (2019), *Guideline for Improving the Reliability of Google Ngram Studies*
+- Research on corpus validation and psychological trend analysis
 
-        Requirements:
+---
 
-        - first column = word
-        - remaining columns = years
-        - values = word frequencies
-        - Excel format (`.xlsx`)
+## Example Workflow
 
-        ---
+1. Retrieve or upload trajectories
+2. Select words, synonym groups, or inflections
+3. Explore trends interactively
+4. Compute AUC statistics
+5. Compare corpora
+6. Export results
 
-  # Technologies Used
+---
 
-      ## Core Stack
+## Project Status
 
-        - Python
-        - Shiny for Python
-        - Pandas
-        - NumPy
-        - SciPy
-        - Plotly
-        - OpenPyXL
+🚧 Active development
 
-        ## Additional Libraries
+NGRAM LAB is an ongoing research and educational project developed at the intersection of corpus linguistics, digital humanities, psychology, and computational social science.
 
-        - Matplotlib
-        - shinywidgets
-        - requests
-        - urllib
+---
 
-        ---
+## Author
 
-        # Statistical Methods
-
-        ## Area Under the Curve (AUC)
-
-        NGRAM LAB computes word trajectory magnitude using trapezoidal integration:
-
-        ```math
-        AUC = \int_{t_0}^{t_n} f(t)\,dt
-        ```
-
-        This allows comparison of long-term word prevalence across corpora.
-
-        ---
-
-        ## Correlation Analysis
-
-        Supported:
-
-        - Pearson correlation
-        - Spearman correlation
-        - trajectory similarity analysis
-
-        ---
-
-        ## Standardization
-
-        The application supports:
-
-        - z-score normalization
-        - indexed trajectories
-        - shared-year filtering
-        - exclusion of zero-year overlaps
-
-        These procedures improve comparability between corpora of different scales.
-
-        ---
-
-        # Research Motivation
-
-        Google Ngram data has become increasingly popular in:
-
-        - digital humanities
-        - psychology
-        - linguistics
-        - cultural analytics
-        - computational social science
-
-        However, historical corpora present several methodological challenges:
-
-        - changing corpus sizes
-        - OCR artifacts
-        - semantic ambiguity
-        - dominance of high-frequency words
-        - inconsistent coverage over time
-
-        NGRAM LAB was created to provide a transparent and reproducible environment for addressing these issues through interactive analysis tools and standardized workflows.
-
-        ---
-
-        # Related Research
-
-        The project was influenced by:
-
-        - Michel et al. (2011), *Quantitative Analysis of Culture Using Millions of Digitized Books*
-        - Younes & Reips (2019), *Guideline for improving the reliability of Google Ngram studies*
-        - research on corpus validation and psychological trend analysis
-
-        ---
-
-        # Example Workflow
-
-        1. Upload or retrieve word trajectories
-        2. Select words or synonym groups
-        3. Explore trajectories interactively
-        4. Compute AUC statistics
-        5. Compare corpora
-        6. Export results to Excel
-
-        ---
-
-        # Project Status
-
-        NGRAM LAB is an actively evolving research and educational project developed in the context of corpus-based trend analysis and methodological validation studies.
-
-        ---
-
-        # Author
-
-        **Dorota Siciak**  
-        University of Konstanz — iScience Group
+**Dorota Siciak**  
+Doctoral Researcher  
+University of Konstanz – iScience Group
