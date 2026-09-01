@@ -19,11 +19,24 @@ from pages.compare_english_corpora import (
 TAB_DESCRIPTIONS = {
     "Ngram Data Fetcher": "Download Google Ngram data or upload word-year files.",
     "Explorer": "Explore word trajectories, AUC values, peaks and trends.",
-    "Compare Corpora": "Compare English Google Ngram corpora.",
-    "Cross-Corpus Analysis": "Compare uploaded corpora with shared years and AUC metrics.",
+    "Compare Ngram Corpora": "Compare English Google Ngram Viewer corpora.",
+    "Cross-Corpora Comparisons": "Compare uploaded corpora with shared years and AUC metrics.",
     "Synonyms": "Analyze synonym groups and concept-level trajectories.",
     "Inflections": "Generate and inspect inflected or related word forms.",
 }
+
+RELATED_PAPERS = [
+    {
+        "authors": "Michel et al. (2011)",
+        "title": "Quantitative Analysis of Culture Using Millions of Digitized Books",
+        "note": "Foundational Google Ngram paper introducing large-scale cultural analysis with digitized books.",
+    },
+    {
+        "authors": "Younes & Reips (2019)",
+        "title": "Guideline for improving the reliability of Google Ngram studies",
+        "note": "Methodological guidance for making Google Ngram analyses more reliable.",
+    },
+]
 
 ROUTES = [
     {
@@ -40,13 +53,13 @@ ROUTES = [
     },
     {
         "path": "/compare-corpora",
-        "label": "Compare Corpora",
+        "label": "Compare Ngram Corpora",
         "value": "compare-corpora",
         "ui": get_compare_english_corpora_ui,
     },
     {
         "path": "/cross-corpus",
-        "label": "Cross-Corpus Analysis",
+        "label": "Cross-Corpora Comparisons",
         "value": "cross-corpus",
         "ui": cross_corpus_ui,
     },
@@ -69,6 +82,7 @@ APP_SHARED_DATA = {
     "uploaded_df": None,
     "uploaded_years": [],
     "uploaded_scale": None,
+    "uploaded_data_version": None,
 }
 
 
@@ -105,8 +119,8 @@ def common_head():
                 const tabDescriptions = {
                     "Ngram Data Fetcher": "Download Google Ngram data or upload word-year files.",
                     "Explorer": "Explore word trajectories, AUC values, peaks and trends.",
-                    "Compare Corpora": "Compare English Google Ngram corpora.",
-                    "Cross-Corpus Analysis": "Compare uploaded corpora with shared years and AUC metrics.",
+                    "Compare Ngram Corpora": "Compare English Google Ngram Viewer corpora.",
+                    "Cross-Corpora Comparisons": "Compare uploaded corpora with shared years and AUC metrics.",
                     "Synonyms": "Analyze synonym groups and concept-level trajectories.",
                     "Inflections": "Generate and inspect inflected or related word forms."
                 };
@@ -326,6 +340,178 @@ def common_head():
         ui.tags.script(
             """
             (function () {
+                function getPlotlyGraphs(container) {
+                    if (!container) return [];
+
+                    const graphs = Array.from(container.querySelectorAll(".js-plotly-plot"));
+
+                    if (container.classList && container.classList.contains("js-plotly-plot")) {
+                        graphs.push(container);
+                    }
+
+                    return graphs;
+                }
+
+                function resizeExplorerPlots() {
+                    const plotIds = [
+                        "trajectory_plot",
+                        "indexed_trajectory_plot",
+                        "segmented_trend_plot"
+                    ];
+
+                    plotIds.forEach(function (id) {
+                        const output = document.getElementById(id);
+                        if (!output) return;
+
+                        const wrapper = output.closest(".explorer-plot-inner") || output.parentElement;
+                        if (!wrapper) return;
+
+                        const width = Math.floor(wrapper.getBoundingClientRect().width);
+                        if (!Number.isFinite(width) || width <= 0) return;
+
+                        if (output.style.width !== width + "px") {
+                            output.style.width = width + "px";
+                        }
+
+                        getPlotlyGraphs(output).forEach(function (graph) {
+                            if (graph.style.width !== width + "px") {
+                                graph.style.width = width + "px";
+                            }
+
+                            if (
+                                window.Plotly &&
+                                typeof window.Plotly.relayout === "function"
+                            ) {
+                                window.Plotly.relayout(graph, { width: width }).catch(function () {
+                                    if (
+                                        window.Plotly.Plots &&
+                                        typeof window.Plotly.Plots.resize === "function"
+                                    ) {
+                                        window.Plotly.Plots.resize(graph);
+                                    }
+                                });
+                            } else if (
+                                window.Plotly &&
+                                window.Plotly.Plots &&
+                                typeof window.Plotly.Plots.resize === "function"
+                            ) {
+                                window.Plotly.Plots.resize(graph);
+                            }
+                        });
+                    });
+                }
+
+                let resizeTimer = null;
+
+                function scheduleExplorerPlotResize() {
+                    window.clearTimeout(resizeTimer);
+                    resizeTimer = window.setTimeout(function () {
+                        window.requestAnimationFrame(resizeExplorerPlots);
+                    }, 80);
+                }
+
+                window.resizeExplorerPlots = resizeExplorerPlots;
+                window.addEventListener("resize", scheduleExplorerPlotResize);
+                window.addEventListener("load", scheduleExplorerPlotResize);
+                document.addEventListener("DOMContentLoaded", scheduleExplorerPlotResize);
+
+                const observer = new MutationObserver(scheduleExplorerPlotResize);
+                observer.observe(document.body, {
+                    childList: true,
+                    subtree: true,
+                });
+
+                scheduleExplorerPlotResize();
+            })();
+            """
+        ),
+        ui.tags.script(
+            """
+            (function () {
+                let explorerLoadingStartedAt = 0;
+                let explorerLoadingHideTimer = null;
+
+                function setExplorerLoading(message) {
+                    const isLoading = Boolean(
+                        typeof message === "boolean" ? message : message && message.is_loading
+                    );
+                    const loading = document.getElementById("explorer_loading_state");
+                    const button = document.getElementById("run_explorer_analysis");
+
+                    window.clearTimeout(explorerLoadingHideTimer);
+
+                    function applyState(show) {
+                        if (loading) {
+                            loading.classList.toggle("is-visible", show);
+                            loading.setAttribute("aria-hidden", show ? "false" : "true");
+                        }
+
+                        if (button) {
+                            button.classList.toggle("is-loading", show);
+                            button.setAttribute("aria-busy", show ? "true" : "false");
+                        }
+                    }
+
+                    if (isLoading) {
+                        explorerLoadingStartedAt = Date.now();
+                        applyState(true);
+                        return;
+                    }
+
+                    const elapsed = Date.now() - explorerLoadingStartedAt;
+                    const delay = Math.max(0, 450 - elapsed);
+                    explorerLoadingHideTimer = window.setTimeout(function () {
+                        applyState(false);
+                    }, delay);
+                }
+
+                function scrollToElement(message) {
+                    const selector = message.selector || "";
+                    const target = selector ? document.querySelector(selector) : null;
+
+                    if (!target) return;
+
+                    if (window.resizeExplorerPlots) {
+                        window.resizeExplorerPlots();
+                    }
+
+                    window.setTimeout(function () {
+                        if (window.resizeExplorerPlots) {
+                            window.resizeExplorerPlots();
+                        }
+
+                        target.scrollIntoView({
+                            behavior: "smooth",
+                            block: "start",
+                        });
+                    }, message.delay_ms || 120);
+                }
+
+                function installHandler() {
+                    if (!window.Shiny || !window.Shiny.addCustomMessageHandler) {
+                        window.setTimeout(installHandler, 50);
+                        return;
+                    }
+
+                    window.Shiny.addCustomMessageHandler("set_explorer_loading", setExplorerLoading);
+                    window.Shiny.addCustomMessageHandler("scroll_to_element", scrollToElement);
+                }
+
+                document.addEventListener("click", function (event) {
+                    const runButton = event.target && event.target.closest("#run_explorer_analysis");
+
+                    if (runButton && runButton.classList.contains("shiny-bound-input")) {
+                        setExplorerLoading(true);
+                    }
+                });
+
+                installHandler();
+            })();
+            """
+        ),
+        ui.tags.script(
+            """
+            (function () {
                 const DATAMUSE_URL = "https://api.datamuse.com/words";
 
                 function sendResponse(payload) {
@@ -508,7 +694,11 @@ def top_tools_ui():
                         href="https://ds24p.github.io/personal_website/",
                         target="_blank",
                     ),
-                    ui.span("Related papers", class_="dropdown-muted-link"),
+                    ui.input_action_button(
+                        "show_related_papers",
+                        "Related papers",
+                        class_="dropdown-muted-link related-papers-button",
+                    ),
                     class_="dropdown-card",
                 ),
                 class_="uni-dropdown",
@@ -550,7 +740,7 @@ def app_header_ui():
                 ui.h3("New here? Start with this workflow"),
                 ui.p("1. Use Ngram Data Fetcher to download or upload word-frequency data."),
                 ui.p("2. Go to Explorer to inspect trajectories, peaks, trends and AUC values."),
-                ui.p("3. Use Compare Corpora or Cross-Corpus Analysis when you want to compare datasets."),
+                ui.p("3. Use Compare Ngram Corpora or Cross-Corpora Comparisons when you want to compare datasets."),
                 ui.p("Tip: each page includes a New here guidance box with step-by-step instructions and option explanations."),
                 class_="guide-box",
             ),
@@ -601,6 +791,7 @@ def app_ui(request):
 
 def server(input_, output, session):
     shared = APP_SHARED_DATA
+    shared["uploaded_data_version"] = reactive.Value(0)
 
     def active_route():
         try:
@@ -644,7 +835,7 @@ def server(input_, output, session):
                         ui.tags.ol(
                             ui.tags.li("Use Ngram Data Fetcher to build or upload your base word-frequency dataset."),
                             ui.tags.li("Go to Explorer to inspect trajectories, trends, AUC, and correlations."),
-                            ui.tags.li("Use Compare Corpora or Cross-Corpus Analysis when you want corpus-level validation."),
+                            ui.tags.li("Use Compare Ngram Corpora for English Google Ngram Viewer corpora, or Cross-Corpora Comparisons for uploaded datasets."),
                         ),
                         class_="guide-modal-section",
                     ),
@@ -653,8 +844,8 @@ def server(input_, output, session):
                         ui.tags.ul(
                             ui.tags.li("Ngram Data Fetcher: collect clean year-by-year data for selected words."),
                             ui.tags.li("Explorer: run detailed single-dataset visual and statistical analysis."),
-                            ui.tags.li("Compare Corpora: compare one word list across English, American, British, and Fiction corpora."),
-                            ui.tags.li("Cross-Corpus Analysis: compare multiple uploaded datasets on shared years, including tests and timeseries summaries."),
+                            ui.tags.li("Compare Ngram Corpora: compare one word list across English, American, British, and Fiction corpora."),
+                            ui.tags.li("Cross-Corpora Comparisons: compare multiple uploaded datasets on shared years, including tests and timeseries summaries."),
                             ui.tags.li("Synonyms and Inflections: expand concepts into related forms and compare their historical dynamics."),
                         ),
                         class_="guide-modal-section",
@@ -667,6 +858,34 @@ def server(input_, output, session):
                     class_="guide-modal-body",
                 ),
                 title="Application guide",
+                easy_close=True,
+                footer=ui.modal_button("Close"),
+            )
+        )
+
+    @reactive.effect
+    @reactive.event(input_.show_related_papers)
+    def _show_related_papers():
+        paper_items = [
+            ui.tags.li(
+                ui.strong(paper["authors"]),
+                ui.br(),
+                ui.em(paper["title"]),
+                ui.p(paper["note"], class_="related-paper-note"),
+            )
+            for paper in RELATED_PAPERS
+        ]
+
+        ui.modal_show(
+            ui.modal(
+                ui.div(
+                    ui.h3("Related papers"),
+                    ui.div(
+                        ui.tags.ul(*paper_items, class_="related-papers-list"),
+                        class_="guide-modal-section related-papers-section",
+                    ),
+                    class_="guide-modal-body related-papers-modal-body",
+                ),
                 easy_close=True,
                 footer=ui.modal_button("Close"),
             )

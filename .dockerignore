@@ -1,0 +1,23 @@
+# Ignore everything by default. Keep the Docker build context tiny and explicit.
+**
+
+# Application runtime files.
+!requirements.txt
+!app.py
+!utils.py
+!pages/
+!pages/**/*.py
+!www/
+!www/**
+
+# Docker metadata needed by builders and humans.
+!Dockerfile
+!compose.yaml
+!.dockerignore
+
+# Never include generated Python/runtime artifacts, even under allowed dirs.
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/*.pyd
+**/.DS_Store

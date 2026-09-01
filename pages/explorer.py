@@ -8,12 +8,16 @@ import tempfile
 import textwrap
 
 from utils import (
+    GOOGLE_NGRAM_YEAR_MAX,
+    GOOGLE_NGRAM_YEAR_MIN,
     auc_trapezoid,
     get_year_columns,
     round_numeric_df,
     safe_corr,
     smooth_series,
     slope_per_year,
+    truncate_display_dataframe,
+    truncate_display_text,
     trend_label,
     z_score_values,
 )
@@ -25,24 +29,21 @@ TREND_COLORS = {
     "stable": "#9CA3AF",   # grey
     "unknown": "#111827",
 }
-
-REFERENCE_WORD = "the"
-DEFAULT_REFERENCE_YEARS = list(range(1901, 2001))
+MAX_EXPLORER_VISUALIZATION_TERMS = 10
+AUC_ORIGINAL_SCALE_COLUMN = "AUC (original scale)"
+AUC_A_ORIGINAL_SCALE_COLUMN = "AUC A (original scale)"
+AUC_B_ORIGINAL_SCALE_COLUMN = "AUC B (original scale)"
+AUC_DIFF_ORIGINAL_SCALE_COLUMN = "AUC difference A - B (original scale)"
 
 
 def explorer_word_choices(shared=None):
     df = shared.get("uploaded_df") if shared else None
 
     if df is None or df.empty or "word" not in df.columns:
-        return [REFERENCE_WORD]
+        return []
 
     words = df["word"].dropna().astype(str).tolist()
-    return sorted(set(words + [REFERENCE_WORD]), key=str.casefold)
-
-
-def default_reference_values():
-    x = np.linspace(0, 1, len(DEFAULT_REFERENCE_YEARS))
-    return (0.6 + 0.6 * x + 0.05 * np.sin(4 * np.pi * x)).tolist()
+    return sorted(set(words), key=str.casefold)
 
 
 def explorer_ui(shared=None):
@@ -52,7 +53,7 @@ def explorer_ui(shared=None):
         ui.div(
             ui.div("Explorer", class_="page-title"),
             ui.p(
-                "Select up to 5 words and compare their frequency trajectories, "
+                f"Select up to {MAX_EXPLORER_VISUALIZATION_TERMS} words and compare their frequency trajectories, "
                 "AUC values, peaks, trends, pairwise correlations, and segmented trend patterns.",
                 class_="muted explorer-hero-text"
             ),
@@ -65,7 +66,7 @@ def explorer_ui(shared=None):
                 ui.div(
                     ui.h3("New here? How this tab works"),
                     ui.p("What this tab does: it analyzes uploaded word trajectories and shows trends, correlations, and summary metrics."),
-                    ui.p("Main options: choose up to 5 words, optional z-score standardisation, optional smoothing, then run analysis."),
+                    ui.p(f"Main options: choose up to {MAX_EXPLORER_VISUALIZATION_TERMS} words, optional z-score standardisation, optional smoothing, then run analysis."),
                     ui.p("Step 1: select words from the list populated in Ngram Data Fetcher."),
                     ui.p("Step 2: enable Z-score when you want to compare shapes instead of absolute levels."),
                     ui.p("Step 3: enable smoothing and set window size to reduce short-term noise."),
@@ -75,16 +76,22 @@ def explorer_ui(shared=None):
                 ),
             ),
 
+            ui.output_ui("explorer_data_notice"),
+
             ui.input_selectize(
                 "selected_word",
-                "Choose up to 5 words",
+                f"Choose up to {MAX_EXPLORER_VISUALIZATION_TERMS} words",
                 choices=word_choices,
-                selected=[REFERENCE_WORD],
+                selected=[],
                 multiple=True,
                 options={
-                    "maxItems": 5,
+                    "maxItems": MAX_EXPLORER_VISUALIZATION_TERMS,
                     "placeholder": "Select words..."
                 }
+            ),
+            ui.p(
+                "Start in Ngram Data Fetcher: fetch or upload word-frequency data, then return here and choose words from that dataset.",
+                class_="muted explorer-control-note",
             ),
 
             ui.div(
@@ -92,6 +99,10 @@ def explorer_ui(shared=None):
                     "use_z_score",
                     "Z-score results (standardisation)",
                     value=False
+                ),
+                ui.p(
+                    "Z-score turns each selected word into mean 0 and standard deviation 1 for plots. AUC is always computed from the original frequency values, not z-score values.",
+                    class_="muted explorer-control-note",
                 ),
                 class_="standardisation-control"
             ),
@@ -101,6 +112,10 @@ def explorer_ui(shared=None):
                     "apply_smoothing",
                     "Apply smoothing",
                     value=False
+                ),
+                ui.p(
+                    "Smoothing applies a moving average to reduce short-term noise in the trajectories.",
+                    class_="muted explorer-control-note",
                 ),
                 class_="standardisation-control"
             ),
@@ -114,24 +129,34 @@ def explorer_ui(shared=None):
                         value=3,
                         min=1,
                     ),
+                    ui.p(
+                        "Window = 3 means a 3-year moving average: each point is averaged with nearby years. Larger windows smooth more, but hide more short-term variation.",
+                        class_="muted explorer-control-note",
+                    ),
                     class_="standardisation-control smoothing-control",
                 ),
             ),
 
-            ui.input_action_button(
-                "run_explorer_analysis",
-                "Run analysis",
-                class_="run-analysis-button"
+            ui.output_ui("explorer_run_button"),
+            ui.div(
+                ui.span(class_="explorer-loading-spinner"),
+                ui.span("Running analysis..."),
+                id="explorer_loading_state",
+                class_="explorer-loading-state",
+                **{"aria-live": "polite", "aria-hidden": "true"},
             ),
-
+            ui.output_text("explorer_status"),
+            ui.p(
+                "Select at least one word, then click Run analysis to update results.",
+                class_="muted explorer-control-note",
+            ),
             ui.download_button(
                 "download_explorer_excel",
                 "Download as Excel file"
             ),
-
             ui.p(
-                "The word 'the' is available for reference",
-                class_="muted section-description"
+                "The Excel download uses the last Run analysis settings. If z-score is enabled, exported yearly data follows the plotted values while AUC stays on the original frequency scale.",
+                class_="muted explorer-download-note",
             ),
 
             ui.div(
@@ -142,23 +167,24 @@ def explorer_ui(shared=None):
                 ),
                 ui.div(
                     ui.div(
-                        output_widget("trajectory_plot", width="100%"),
+                        output_widget("trajectory_plot", width="100%", fill=True),
                         class_="explorer-plot-inner",
                     ),
                     class_="explorer-plot-scroll",
                 ),
+                id="explorer_results_anchor",
                 class_="analysis-section explorer-chart-section"
             ),
 
             ui.div(
                 ui.h3("Indexed Time Series Comparison", class_="table-section-title"),
                 ui.p(
-                    "Each word starts at 100 in its first available year, making growth and decline easier to compare.",
+                    "Each word starts at 100 in its first available year. When z-score is enabled, standardized values are shown directly instead of rebasing near-zero z-scores.",
                     class_="muted section-description"
                 ),
                 ui.div(
                     ui.div(
-                        output_widget("indexed_trajectory_plot", width="100%"),
+                        output_widget("indexed_trajectory_plot", width="100%", fill=True),
                         class_="explorer-plot-inner",
                     ),
                     class_="explorer-plot-scroll",
@@ -174,7 +200,7 @@ def explorer_ui(shared=None):
                 ),
                 ui.div(
                     ui.div(
-                        output_widget("segmented_trend_plot", width="100%"),
+                        output_widget("segmented_trend_plot", width="100%", fill=True),
                         class_="explorer-plot-inner",
                     ),
                     class_="explorer-plot-scroll",
@@ -185,7 +211,7 @@ def explorer_ui(shared=None):
             ui.div(
                 ui.h3("Word Metrics", class_="table-section-title"),
                 ui.p(
-                    "Summary statistics for each selected word: AUC, average frequency, peak year, global trend, and shape.",
+                    "Summary statistics for each selected word. AUC (area under the curve) is computed from the original frequency values, so it stays interpretable and non-standardized when z-score plots are enabled.",
                     class_="muted section-description"
                 ),
                 ui.output_data_frame("word_metrics_table"),
@@ -214,13 +240,19 @@ def explorer_ui(shared=None):
                         multiple=True,
                         options={
                             "placeholder": "Type or choose word(s)...",
-                            "maxItems": 5,
+                            "maxItems": MAX_EXPLORER_VISUALIZATION_TERMS,
                         },
                     ),
                     ui.input_selectize(
                         "segmented_trend_filter_year",
                         "Filter segmented trend rows by year",
-                        choices=[str(y) for y in range(1900, 2025)],
+                        choices=[
+                            str(y)
+                            for y in range(
+                                GOOGLE_NGRAM_YEAR_MIN,
+                                GOOGLE_NGRAM_YEAR_MAX + 1,
+                            )
+                        ],
                         multiple=True,
                         options={"placeholder": "Choose year(s)...", "maxItems": 10},
                     ),
@@ -233,7 +265,7 @@ def explorer_ui(shared=None):
             ui.div(
                 ui.h3("Pairwise Word Comparisons", class_="table-section-title"),
                 ui.p(
-                    "Direct comparison between every pair of selected words.",
+                    "Direct comparison between every pair of selected words. Correlation describes similarity of shape over time; AUC difference is computed from the original frequency values.",
                     class_="muted section-description"
                 ),
                 ui.output_data_frame("pairwise_comparison_table"),
@@ -243,7 +275,7 @@ def explorer_ui(shared=None):
             ui.div(
                 ui.h3("Time-Series Correlation Matrix", class_="table-section-title"),
                 ui.p(
-                    "Pearson correlations between word trajectories.",
+                    "Pearson correlations between word trajectories. Values close to 1 move together; values close to -1 move in opposite directions.",
                     class_="muted section-description"
                 ),
                 ui.output_data_frame("correlation_matrix_table"),
@@ -253,12 +285,12 @@ def explorer_ui(shared=None):
             ui.div(
                 ui.h3("Correlation Heatmap", class_="table-section-title"),
                 ui.p(
-                    "Interactive square heatmap of Pearson correlations.",
+                    "Interactive square heatmap of Pearson correlations for quick visual comparison of trajectory similarity.",
                     class_="muted section-description"
                 ),
                 ui.div(
                     ui.div(
-                        output_widget("correlation_heatmap", width="100%"),
+                        output_widget("correlation_heatmap", width="100%", fill=True),
                         class_="explorer-plot-inner explorer-heatmap-inner",
                     ),
                     class_="centered-plot-container explorer-plot-scroll",
@@ -274,7 +306,75 @@ def explorer_ui(shared=None):
 
 def explorer_server(input, output, session, shared):
     analysis_state = reactive.Value(None)
+    analysis_status = reactive.Value("")
 
+    def uploaded_data_version():
+        data_version = shared.get("uploaded_data_version")
+
+        if data_version is None:
+            return 0
+
+        try:
+            return int(data_version.get() or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    def has_uploaded_data():
+        uploaded_data_version()
+
+        df = shared.get("uploaded_df")
+        years = shared.get("uploaded_years") or []
+
+        return (
+            df is not None
+            and not df.empty
+            and "word" in df.columns
+            and bool(years)
+        )
+
+    @output
+    @render.ui
+    def explorer_data_notice():
+        if not has_uploaded_data():
+            return ui.div(
+                ui.strong("No data loaded yet."),
+                " Go to Ngram Data Fetcher to retrieve word-frequency data.",
+                class_="explorer-data-notice explorer-data-notice-warning",
+                **{"aria-live": "polite"},
+            )
+
+        df = shared.get("uploaded_df")
+        word_count = int(df["word"].dropna().nunique()) if df is not None else 0
+
+        return ui.div(
+            f"Data loaded from Ngram Data Fetcher: {word_count} term(s) available. ",
+            f"Choose up to {MAX_EXPLORER_VISUALIZATION_TERMS} terms, then click Run analysis.",
+            class_="explorer-data-notice explorer-data-notice-ready",
+            **{"aria-live": "polite"},
+        )
+
+    @output
+    @render.ui
+    def explorer_run_button():
+        data_ready = has_uploaded_data()
+
+        return ui.input_action_button(
+            "run_explorer_analysis",
+            "Run analysis",
+            class_="run-analysis-button",
+            disabled=not data_ready,
+            title=(
+                "Run analysis"
+                if data_ready
+                else "Retrieve data in Ngram Data Fetcher first."
+            ),
+        )
+
+    @output
+    @render.text
+    def explorer_status():
+        return analysis_status.get()
+    
     def empty_figure(message):
         fig = go.Figure()
         fig.add_annotation(
@@ -308,7 +408,7 @@ def explorer_server(input, output, session, shared):
         if isinstance(selected, str):
             selected = [selected]
 
-        return list(selected)[:5]
+        return list(selected)
 
     def analysis_has_run():
         return analysis_state.get() is not None
@@ -318,18 +418,19 @@ def explorer_server(input, output, session, shared):
 
     @reactive.effect
     def _sync_selected_word_choices_from_shared_data():
+        uploaded_data_version()
         choices = explorer_word_choices(shared)
         selected = get_selected_words()
         selected = [word for word in selected if word in choices]
 
-        if not selected:
-            selected = [REFERENCE_WORD]
+        if not selected and choices:
+            selected = choices[:1]
 
         try:
             ui.update_selectize(
                 "selected_word",
                 choices=choices,
-                selected=selected[:5],
+                selected=selected[:MAX_EXPLORER_VISUALIZATION_TERMS],
             )
         except Exception:
             pass
@@ -365,16 +466,99 @@ def explorer_server(input, output, session, shared):
 
     @reactive.effect
     @reactive.event(input.run_explorer_analysis)
-    def _capture_explorer_analysis():
+    async def _capture_explorer_analysis():
         if int(input.run_explorer_analysis() or 0) <= 0:
             return
 
-        analysis_state.set({
-            "selected_words": get_selected_words(),
-            "use_z_score": live_use_z_score(),
-            "apply_smoothing": live_use_smoothing(),
-            "smoothing_window": live_smoothing_window(),
-        })
+        await session.send_custom_message(
+            "set_explorer_loading",
+            {"is_loading": True},
+        )
+
+        try:
+            df = shared.get("uploaded_df")
+            years = shared.get("uploaded_years") or []
+
+            if df is None or df.empty or "word" not in df.columns or not years:
+                analysis_state.set(None)
+                analysis_status.set(
+                    "No data loaded yet. Go to Ngram Data Fetcher to retrieve word-frequency data."
+                )
+                return
+
+            words = get_selected_words()
+
+            if not words:
+                analysis_state.set(None)
+                analysis_status.set(
+                    "Please select at least one word before running the analysis."
+                )
+                return
+
+            if len(words) > MAX_EXPLORER_VISUALIZATION_TERMS:
+                analysis_state.set(None)
+                analysis_status.set(
+                    f"Please select up to {MAX_EXPLORER_VISUALIZATION_TERMS} terms for visualization."
+                )
+                return
+
+            year_cols = get_year_columns(df, years)
+
+            if not year_cols:
+                analysis_state.set(None)
+                analysis_status.set(
+                    "No valid year data were found in the current dataset."
+                )
+                return
+
+            selected_df = df[df["word"].isin(words)].copy()
+
+            if selected_df.empty:
+                analysis_state.set(None)
+                analysis_status.set(
+                    "No frequency data were found for the selected terms and corpus. "
+                    "Please check the terms, language, corpus, and year range."
+                )
+                return
+
+            numeric_data = selected_df[year_cols].apply(
+                pd.to_numeric,
+                errors="coerce",
+            )
+
+            values = numeric_data.to_numpy(dtype=float)
+
+            if values.size == 0 or not np.isfinite(values).any():
+                analysis_state.set(None)
+                analysis_status.set(
+                    "No frequency data were found for the selected terms and corpus. "
+                    "Please check the terms, language, corpus, and year range."
+                )
+                return
+
+            analysis_state.set({
+                "selected_words": words,
+                "use_z_score": live_use_z_score(),
+                "apply_smoothing": live_use_smoothing(),
+                "smoothing_window": live_smoothing_window(),
+            })
+
+            analysis_status.set(
+                f"Analysis completed for {len(words)} selected word(s)."
+            )
+
+            await session.send_custom_message(
+                "scroll_to_element",
+                {
+                    "selector": "#explorer_results_anchor",
+                    "delay_ms": 180,
+                },
+            )
+        finally:
+            await session.send_custom_message(
+                "set_explorer_loading",
+                {"is_loading": False},
+            )
 
     def active_scale_label():
         smoothing_note = ""
@@ -462,24 +646,26 @@ def explorer_server(input, output, session, shared):
         return fig
 
     def get_selected_data():
-        df = shared["uploaded_df"]
-        years = shared["uploaded_years"]
         state = current_analysis()
 
         if state is None:
             return None, [], []
 
-        words = list(state["selected_words"])
+        df = shared.get("uploaded_df")
+        years = shared.get("uploaded_years") or []
 
-        if (df is None or df.empty or not years) and words == [REFERENCE_WORD]:
-            years = DEFAULT_REFERENCE_YEARS
-            year_cols = [str(y) for y in years]
-            row = {"word": REFERENCE_WORD}
-            for y, value in zip(years, default_reference_values()):
-                row[str(y)] = value
-            return pd.DataFrame([row]), years, year_cols
+        if df is None or df.empty:
+            return None, [], []
 
-        if df is None or df.empty or not years:
+        if "word" not in df.columns:
+            return None, [], []
+
+        if not years:
+            return None, [], []
+
+        words = list(state.get("selected_words", []))
+
+        if not words:
             return None, [], []
 
         year_cols = get_year_columns(df, years)
@@ -487,12 +673,10 @@ def explorer_server(input, output, session, shared):
         if not year_cols:
             return None, [], []
 
-        selected_words = list(words)
+        selected_df = df[df["word"].isin(words)].copy()
 
-        if not selected_words:
+        if selected_df.empty:
             return None, [], []
-
-        selected_df = df[df["word"].isin(selected_words)].copy()
 
         return selected_df, years, year_cols
 
@@ -644,7 +828,7 @@ def explorer_server(input, output, session, shared):
 
         return segments
 
-    def build_word_series():
+    def build_word_series(apply_z_score_transform=True):
         selected_df, years, year_cols = get_selected_data()
 
         if not years or not year_cols:
@@ -655,16 +839,17 @@ def explorer_server(input, output, session, shared):
         if selected_df is not None:
             for _, row in selected_df.iterrows():
                 word = row["word"]
-                values = row[year_cols].to_numpy(dtype=float)
+                values = pd.to_numeric(
+                    row[year_cols],
+                    errors="coerce",
+                ).to_numpy(dtype=float)
 
                 if use_smoothing():
                     values = smooth_series(values, window=smoothing_window())
 
-                if use_z_score():
+                if apply_z_score_transform and use_z_score():
                     values = z_score_values(values)
                 out[word] = values
-
-        # Reference word 'the' is included through the selected_word control by default.
 
         return out, years
 
@@ -720,7 +905,7 @@ def explorer_server(input, output, session, shared):
         return df
 
     def build_metrics_df():
-        series, years = build_word_series()
+        series, years = build_word_series(apply_z_score_transform=False)
 
         rows = []
 
@@ -744,7 +929,7 @@ def explorer_server(input, output, session, shared):
 
             rows.append({
                 "Word": word,
-                "AUC": auc,
+                AUC_ORIGINAL_SCALE_COLUMN: auc,
                 "Mean frequency": mean_value,
                 "Maximum frequency": max_value,
                 "Minimum frequency": min_value,
@@ -771,8 +956,8 @@ def explorer_server(input, output, session, shared):
             values_a = series[word_a]
             values_b = series[word_b]
 
-            auc_a = metrics_by_word[word_a]["AUC"]
-            auc_b = metrics_by_word[word_b]["AUC"]
+            auc_a = metrics_by_word[word_a][AUC_ORIGINAL_SCALE_COLUMN]
+            auc_b = metrics_by_word[word_b][AUC_ORIGINAL_SCALE_COLUMN]
 
             auc_ratio = auc_a / auc_b if auc_b != 0 else np.nan
 
@@ -780,9 +965,9 @@ def explorer_server(input, output, session, shared):
                 "Word A": word_a,
                 "Word B": word_b,
                 "Time-series correlation": safe_corr(values_a, values_b),
-                "AUC A": auc_a,
-                "AUC B": auc_b,
-                "AUC difference A - B": auc_a - auc_b,
+                AUC_A_ORIGINAL_SCALE_COLUMN: auc_a,
+                AUC_B_ORIGINAL_SCALE_COLUMN: auc_b,
+                AUC_DIFF_ORIGINAL_SCALE_COLUMN: auc_a - auc_b,
                 "AUC ratio A / B": auc_ratio,
                 "Peak year A": metrics_by_word[word_a]["Peak year"],
                 "Peak year B": metrics_by_word[word_b]["Peak year"],
@@ -904,24 +1089,29 @@ def explorer_server(input, output, session, shared):
         series, years = word_series_data()
 
         if not series:
-            return empty_figure("Fetch Ngram data first, then select up to 5 words.")
+            return empty_figure(
+                f"Fetch Ngram data first, then select up to {MAX_EXPLORER_VISUALIZATION_TERMS} words."
+            )
 
         fig = go.Figure()
 
         for word, values in series.items():
+            display_word = truncate_display_text(word, max_chars=40)
+
             fig.add_trace(
                 go.Scatter(
                     x=years,
                     y=values,
                     mode="lines+markers",
-                    name=word,
+                    name=display_word,
                     line=dict(
                         width=4,
-                        dash="dash" if word == "the" else "solid",
+                        dash="solid",
                     ),
                     marker=dict(size=6, opacity=0.85),
+                    customdata=[word for _ in years],
                     hovertemplate=(
-                        "Word: %{fullData.name}<br>"
+                        "Word: %{customdata}<br>"
                         "Year: %{x}<br>"
                         "Frequency: %{y:.2f}<extra></extra>"
                     )
@@ -948,42 +1138,58 @@ def explorer_server(input, output, session, shared):
             return empty_figure("No selected words to compare.")
 
         fig = go.Figure()
+        y_label = "Z-score" if use_z_score() else "Index"
 
         for word, values in series.items():
+            display_word = truncate_display_text(word, max_chars=40)
             values = np.asarray(values, dtype=float)
             finite = np.isfinite(values)
 
             if not finite.any():
                 continue
 
-            first_valid = values[finite][0]
-            indexed = values if first_valid == 0 else values / first_valid * 100
+            if use_z_score():
+                plotted_values = values
+                y_label = "Z-score"
+                hover_label = "Z-score"
+            else:
+                first_valid = values[finite][0]
+                plotted_values = values if first_valid == 0 else values / first_valid * 100
+                y_label = "Index"
+                hover_label = "Index"
 
             fig.add_trace(
                 go.Scatter(
                     x=years,
-                    y=indexed,
+                    y=plotted_values,
                     mode="lines+markers",
-                    name=word,
+                    name=display_word,
                     line=dict(
                         width=4,
-                        dash="dash" if word == "the" else "solid",
+                        dash="solid",
                     ),
                     marker=dict(size=6, opacity=0.85),
+                    customdata=[word for _ in years],
                     hovertemplate=(
-                        "Word: %{fullData.name}<br>"
+                        "Word: %{customdata}<br>"
                         "Year: %{x}<br>"
-                        "Index: %{y:.2f}<extra></extra>"
+                        f"{hover_label}: "
+                        "%{y:.2f}<extra></extra>"
                     )
                 )
             )
 
-        fig.add_hline(y=100, line_dash="dash", opacity=0.5)
+        if use_z_score():
+            fig.add_hline(y=0, line_dash="dash", opacity=0.5)
+            title = f"Standardized trajectories ({score_note().replace('Scale: ', '')})"
+        else:
+            fig.add_hline(y=100, line_dash="dash", opacity=0.5)
+            title = f"Indexed trajectories: first available year = 100 ({score_note().replace('Scale: ', '')})"
 
         apply_common_plot_layout(
             fig,
-            title=f"Indexed trajectories: first available year = 100 ({score_note().replace('Scale: ', '')})",
-            yaxis_title="Index",
+            title=title,
+            yaxis_title=y_label,
             height=640,
         )
 
@@ -1009,6 +1215,7 @@ def explorer_server(input, output, session, shared):
             if str(word) not in plotted_words:
                 continue
 
+            display_word = truncate_display_text(word, max_chars=40)
             values = np.asarray(values, dtype=float)
 
             fig.add_trace(
@@ -1017,7 +1224,7 @@ def explorer_server(input, output, session, shared):
                     y=values,
                     mode="lines",
                     line=dict(color="rgba(0,0,0,0.18)", width=1),
-                    name=f"{word} full trajectory",
+                    name=f"{display_word} full trajectory",
                     showlegend=False,
                     hoverinfo="skip",
                 )
@@ -1076,7 +1283,7 @@ def explorer_server(input, output, session, shared):
                         y=[values[peak_idx]],
                         mode="markers+text",
                         marker=dict(color="black", size=9),
-                        text=[f"{word} peak"],
+                        text=[f"{display_word} peak"],
                         textfont=dict(size=14),
                         textposition="top center",
                         cliponaxis=False,
@@ -1126,8 +1333,10 @@ def explorer_server(input, output, session, shared):
 
         df = round_numeric_df(df)
 
+        display_df = truncate_display_dataframe(df, columns=["Word"])
+
         return render.DataGrid(
-            df,
+            display_df,
             filters=False,
             height="320px",
             width="100%",
@@ -1148,8 +1357,10 @@ def explorer_server(input, output, session, shared):
 
         df = round_numeric_df(df)
 
+        display_df = truncate_display_dataframe(df, columns=["Word"])
+
         return render.DataGrid(
-            df,
+            display_df,
             filters=False,
             height="360px",
             width="100%",
@@ -1170,8 +1381,10 @@ def explorer_server(input, output, session, shared):
 
         df = round_numeric_df(df)
 
+        display_df = truncate_display_dataframe(df, columns=["Word A", "Word B"])
+
         return render.DataGrid(
-            df,
+            display_df,
             filters=False,
             height="360px",
             width="100%",
@@ -1192,8 +1405,10 @@ def explorer_server(input, output, session, shared):
 
         df = round_numeric_df(df)
 
+        display_df = truncate_display_dataframe(df, columns=["Word"])
+
         return render.DataGrid(
-            df,
+            display_df,
             filters=False,
             height="260px",
             width="100%",
@@ -1281,18 +1496,26 @@ def explorer_server(input, output, session, shared):
                 tickfont=dict(size=14),
                 tickmode="array",
                 tickvals=words,
-                ticktext=[wrap_axis_label(word) for word in words],
+                ticktext=[
+                    wrap_axis_label(truncate_display_text(word, max_chars=40))
+                    for word in words
+                ],
                 automargin=True,
+                constraintoward="center",
             ),
             yaxis=dict(
                 autorange="reversed",
                 scaleanchor="x",
                 scaleratio=1,
                 constrain="domain",
+                constraintoward="middle",
                 tickfont=dict(size=14),
                 tickmode="array",
                 tickvals=words,
-                ticktext=[wrap_axis_label(word) for word in words],
+                ticktext=[
+                    wrap_axis_label(truncate_display_text(word, max_chars=40))
+                    for word in words
+                ],
                 automargin=True,
             ),
         )
@@ -1340,6 +1563,7 @@ def explorer_server(input, output, session, shared):
                 "year_start",
                 "year_end",
                 "scale",
+                "metric_scale",
                 "apply_smoothing",
                 "smoothing_window",
             ],
@@ -1349,6 +1573,7 @@ def explorer_server(input, output, session, shared):
                 min(years) if years else "",
                 max(years) if years else "",
                 active_scale_label(),
+                "original frequency values (z-score not applied)",
                 use_smoothing(),
                 smoothing_window() if use_smoothing() else "",
             ]

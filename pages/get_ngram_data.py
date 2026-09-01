@@ -2,15 +2,22 @@ from shiny import reactive, render, ui
 import pandas as pd
 
 from utils import (
+    GOOGLE_NGRAM_YEAR_MAX,
+    GOOGLE_NGRAM_YEAR_MIN,
+    MAX_TERM_INPUT_CHARS,
+    get_corpus_year_range,
     fetch_ngram_timeseries,
     parse_manual_words,
     read_word_list_from_excel,
     read_word_list_from_txt,
+    truncate_display_dataframe,
+    truncate_display_text,
     unique_words,
 )
 
 
-REFERENCE_WORD = "the"
+MAX_FETCHER_WORDS = 200
+MAX_FETCHER_DATA_POINTS = 50_000
 
 def get_ngram_data_ui():
     return ui.div(
@@ -22,7 +29,6 @@ def get_ngram_data_ui():
             "Optionally, values can be converted to per million words (PMW).",
             class_="muted ngram-fetcher-intro"
         ),
-
         ui.panel_conditional(
             "input.user_mode === 'New here'",
             ui.div(
@@ -45,9 +51,14 @@ def get_ngram_data_ui():
                     ui.input_text_area(
                         "manual_words",
                         "Type words manually",
-                        placeholder="Type one word per line",
+                        placeholder="Type one word per line or separate words with commas",
                         rows=6
                     ),
+                ui.p(
+                    f"Maximum {MAX_FETCHER_WORDS} words per request. "
+                    f"Maximum {MAX_TERM_INPUT_CHARS} characters per term.",
+                    class_="muted ngram-input-note"
+                ),
                     class_="inner-card"
                 ),
 
@@ -67,16 +78,16 @@ def get_ngram_data_ui():
                         "year_start",
                         "Start year",
                         value=1901,
-                        min=1500,
-                        max=2019
+                        min=GOOGLE_NGRAM_YEAR_MIN,
+                        max=GOOGLE_NGRAM_YEAR_MAX
                     ),
 
                     ui.input_numeric(
                         "year_end",
                         "End year",
-                        value=2000,
-                        min=1500,
-                        max=2019
+                        value=GOOGLE_NGRAM_YEAR_MAX,
+                        min=GOOGLE_NGRAM_YEAR_MIN,
+                        max=GOOGLE_NGRAM_YEAR_MAX
                     ),
 
                     ui.input_select(
@@ -84,14 +95,19 @@ def get_ngram_data_ui():
                         "Corpus",
                         choices={
                             "26": "English 2019",
-                            "27": "American English 2019",
-                            "28": "British English 2019",
-                            "29": "English Fiction 2019",
-                            "ger_2019": "German 2019",
-                            "ita_2019": "Italian 2019",
+                            "27": "English Fiction 2019",
+                            "28": "American English 2019",
+                            "29": "British English 2019",
+                            "31": "German 2019",
+                            "33": "Italian 2019",
                         },
                         selected="26"
                     ),
+                    ui.p(
+                        "Use terms that correspond to the language of the selected corpus.",
+                        class_="muted ngram-input-note"
+                    ),
+                    ui.output_text("corpus_year_range"),
 
                     ui.input_checkbox(
                         "convert_to_pmw",
@@ -131,6 +147,51 @@ def get_ngram_data_server(input, output, session, shared):
     status_text = reactive.Value("No data fetched yet.")
     scale_text = reactive.Value("raw relative frequency")
 
+    @output
+    @render.text
+    def corpus_year_range():
+        min_year, max_year = get_corpus_year_range(input.corpus())
+
+        return (
+            f"Available years for the selected corpus: "
+            f"{min_year}–{max_year}"
+        )
+
+    @reactive.effect
+    def _update_year_inputs_for_corpus():
+        corpus = input.corpus()
+        min_year, max_year = get_corpus_year_range(corpus)
+
+        current_start = input.year_start()
+        current_end = input.year_end()
+
+        try:
+            current_start = int(current_start)
+        except (TypeError, ValueError):
+            current_start = min_year
+
+        try:
+            current_end = int(current_end)
+        except (TypeError, ValueError):
+            current_end = max_year
+
+        new_start = min(max(current_start, min_year), max_year)
+        new_end = min(max(current_end, min_year), max_year)
+
+        ui.update_numeric(
+            "year_start",
+            min=min_year,
+            max=max_year,
+            value=new_start,
+        )
+
+        ui.update_numeric(
+            "year_end",
+            min=min_year,
+            max=max_year,
+            value=new_end,
+        )
+
     def collect_words():
         words = []
 
@@ -150,9 +211,6 @@ def get_ngram_data_server(input, output, session, shared):
                 words.extend(read_word_list_from_excel(path))
 
         unique = unique_words(words)
-        if REFERENCE_WORD not in unique:
-            unique.insert(0, REFERENCE_WORD)
-
         return unique
 
     @reactive.effect
@@ -164,14 +222,63 @@ def get_ngram_data_server(input, output, session, shared):
             status_text.set("No words provided. Type words manually or upload TXT/Excel file.")
             return
 
-        year_start = int(input.year_start())
-        year_end = int(input.year_end())
+        too_long_words = [
+            word for word in words
+            if len(str(word)) > MAX_TERM_INPUT_CHARS
+        ]
 
-        if year_start > year_end:
-            status_text.set("Start year cannot be greater than end year.")
+        if too_long_words:
+            sample = ", ".join(
+                truncate_display_text(word, max_chars=50)
+                for word in too_long_words[:3]
+            )
+            more = (
+                f" and {len(too_long_words) - 3} more"
+                if len(too_long_words) > 3
+                else ""
+            )
+            status_text.set(
+                f"Terms can be up to {MAX_TERM_INPUT_CHARS} characters. "
+                f"Please shorten: {sample}{more}"
+            )
             return
 
         corpus = input.corpus()
+        min_year, max_year = get_corpus_year_range(corpus)
+
+        try:
+            year_start = int(input.year_start())
+            year_end = int(input.year_end())
+        except (TypeError, ValueError):
+            status_text.set(
+                "Start year and end year must be valid numbers."
+            )
+            return
+
+
+        if year_start < min_year or year_start > max_year:
+            status_text.set(
+                f"Invalid start year: {year_start}. "
+                f"Available years for the selected corpus are "
+                f"{min_year}–{max_year}."
+            )
+            return
+
+
+        if year_end < min_year or year_end > max_year:
+            status_text.set(
+                f"Invalid end year: {year_end}. "
+                f"Available years for the selected corpus are "
+                f"{min_year}–{max_year}."
+            )
+            return
+
+
+        if year_start >= year_end:
+            status_text.set(
+                "Start year must be earlier than end year."
+            )
+            return
         convert_to_pmw = bool(input.convert_to_pmw())
 
         scale = (
@@ -183,9 +290,30 @@ def get_ngram_data_server(input, output, session, shared):
         scale_text.set(scale)
         years = list(range(year_start, year_end + 1))
         expected_len = len(years)
+        requested_points = len(words) * expected_len
+
+        if len(words) > MAX_FETCHER_WORDS:
+            status_text.set(
+                f"You entered {len(words)} words. "
+                f"A maximum of {MAX_FETCHER_WORDS} words can be processed at once. "
+                "Please reduce your list or split it into multiple requests."
+            )
+            return
+
+        if requested_points > MAX_FETCHER_DATA_POINTS:
+            status_text.set(
+                f"Request too large: {len(words)} words x {expected_len} years "
+                f"= {requested_points:,} values. Use max {MAX_FETCHER_DATA_POINTS:,} values per fetch "
+                "by reducing the word list or year range."
+            )
+            return
 
         rows = []
         errors = []
+
+        status_text.set(
+            f"Downloading {len(words)} words for years {year_start}-{year_end}..."
+        )
 
         for word in words:
             row = {"word": word}
@@ -199,19 +327,40 @@ def get_ngram_data_server(input, output, session, shared):
                     smoothing=0,
                     case_insensitive=False,
                 )
+
             except Exception as exc:
                 errors.append(f"{word}: {exc}")
 
                 for y in years:
                     row[str(y)] = None
+
                 rows.append(row)
                 continue
 
+            # Google returned no frequency data for this word
             if not ts:
-                ts = [0.0] * expected_len
+                errors.append(f"{word}: no frequency data found")
 
-            ts = (ts + [0.0] * expected_len)[:expected_len]
+                for y in years:
+                    row[str(y)] = None
 
+                rows.append(row)
+                continue
+
+            # Google returned an incomplete time series
+            if len(ts) != expected_len:
+                errors.append(
+                    f"{word}: incomplete frequency data "
+                    f"({len(ts)} of {expected_len} years returned)"
+                )
+
+                for y in years:
+                    row[str(y)] = None
+
+                rows.append(row)
+                continue
+
+            # Valid time series
             for y, value in zip(years, ts):
                 value = float(value)
 
@@ -232,7 +381,11 @@ def get_ngram_data_server(input, output, session, shared):
         shared["uploaded_years"] = years
         shared["uploaded_scale"] = scale
 
-        choices = sorted(set(df["word"].dropna().unique().tolist() + [REFERENCE_WORD]))
+        data_version = shared.get("uploaded_data_version")
+        if data_version is not None:
+            data_version.set(int(data_version.get() or 0) + 1)
+
+        choices = sorted(set(df["word"].dropna().unique().tolist()), key=str.casefold)
 
         try:
             selected = input.selected_word()
@@ -245,8 +398,9 @@ def get_ngram_data_server(input, output, session, shared):
             selected = [selected]
 
         selected = [w for w in selected if w in choices]
-        if REFERENCE_WORD not in selected:
-            selected.insert(0, REFERENCE_WORD)
+
+        if not selected:
+            selected = choices[:1]
 
         try:
             ui.update_selectize(
@@ -285,8 +439,10 @@ def get_ngram_data_server(input, output, session, shared):
                 filters=False
             )
 
+        display_df = truncate_display_dataframe(df, columns=["word"])
+
         return render.DataGrid(
-            df,
+            display_df,
             filters=False,
             height="500px",
             width="100%",
@@ -301,6 +457,11 @@ def get_ngram_data_server(input, output, session, shared):
                         "background-color": "white",
                         "z-index": "2",
                         "font-weight": "600",
+                        "min-width": "180px",
+                        "max-width": "280px",
+                        "overflow": "hidden",
+                        "text-overflow": "ellipsis",
+                        "white-space": "nowrap",
                     },
                 }
             ],

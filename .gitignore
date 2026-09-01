@@ -3,3 +3,12 @@ _site/
 _shinylive_app/
 .shinylive/
 shinylive-cache/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+shiny-local.*.log

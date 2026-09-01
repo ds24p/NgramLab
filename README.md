@@ -8,6 +8,8 @@
 
 **NGRAM LAB** is an interactive Python-based application for exploring, visualizing, and comparing word frequency trajectories across multiple historical text corpora.
 
+For virtual Linux server and Docker hosting requirements, see [SERVER_REQUIREMENTS.md](SERVER_REQUIREMENTS.md). This repository includes a `Dockerfile` and `compose.yaml` for containerized deployment.
+
 The application was designed for research workflows involving:
 
 - Google Ngram datasets
@@ -251,6 +253,32 @@ The tool combines:
         ```bash
         shiny run app.py
         ```
+
+        ## Run with Docker
+
+        Build and start the app container:
+
+        ```bash
+        docker compose up -d --build
+        ```
+
+        The container listens on `127.0.0.1:8000` on the host. In production,
+        put a reverse proxy such as Caddy or Nginx in front of it to provide
+        HTTPS and the public domain, for example `https://ngram.uni-konstanz.de`.
+
+        Check logs:
+
+        ```bash
+        docker compose logs -f ngram-lab
+        ```
+
+        Stop the app:
+
+        ```bash
+        docker compose down
+        ```
+
+        Example reverse proxy configurations are in `deploy/`.
 
         ---
 

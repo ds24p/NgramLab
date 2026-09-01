@@ -1,4 +1,5 @@
 from shiny import reactive, render, ui
+from shiny.types import SilentException
 from shinywidgets import output_widget, render_widget
 import pandas as pd
 import plotly.graph_objects as go
@@ -6,12 +7,16 @@ import tempfile
 import uuid
 
 from utils import (
+    GOOGLE_NGRAM_YEAR_MAX,
+    GOOGLE_NGRAM_YEAR_MIN,
     PMW_LABEL,
     build_ngram_auc_df,
     build_ngram_group_mean_df,
     build_ngram_wide_df,
     clean_lower_terms,
     fetch_google_ngram_pmw,
+    normalize_ngram_year_range,
+    parse_manual_words,
     parse_client_api_payload,
     read_lower_terms_from_excel,
     read_lower_terms_from_txt,
@@ -121,17 +126,23 @@ def inflections_explorer_ui():
             ui.input_numeric(
                 "infl_year_start",
                 "Start year",
-                value=1900,
-                min=1500,
-                max=2022,
+                value=GOOGLE_NGRAM_YEAR_MIN,
+                min=GOOGLE_NGRAM_YEAR_MIN,
+                max=GOOGLE_NGRAM_YEAR_MAX,
             ),
             ui.input_numeric(
                 "infl_year_end",
                 "End year",
                 value=2019,
-                min=1500,
-                max=2022,
+                min=GOOGLE_NGRAM_YEAR_MIN,
+                max=GOOGLE_NGRAM_YEAR_MAX,
             ),
+        ),
+        ui.p(
+            f"Google Ngram 2019 corpora are queried for years "
+            f"{GOOGLE_NGRAM_YEAR_MIN}-{GOOGLE_NGRAM_YEAR_MAX}. "
+            "Use forms that match the selected corpus language.",
+            class_="muted explorer-control-note",
         ),
 
         ui.layout_columns(
@@ -162,8 +173,13 @@ def inflections_explorer_ui():
                     "Add forms manually",
                     value="",
                     rows=6,
-                    placeholder="One form per line, e.g.\nmother\nmothers\nmother's\nmothering"
+                    placeholder="One form per line or comma-separated, e.g.\nmother\nmothers\nmother's\nmothering",
                 ),
+                ui.p(
+                    "Forms typed here are detected before Fetch Google Ngram data runs.",
+                    class_="muted inflections-manual-hint",
+                ),
+                ui.output_ui("infl_manual_terms_preview"),
                 class_="inflections-manual-entry",
             ),
             ui.div(
@@ -220,7 +236,7 @@ def inflections_explorer_ui():
 
         ui.input_action_button(
             "infl_fetch",
-            "Fetch Google Ngram data"
+            "Fetch Google Ngram data",
         ),
 
         ui.download_button(
@@ -267,19 +283,18 @@ def inflections_explorer_server(input_, output, session, _shared):
     ngram_data = reactive.Value(pd.DataFrame())
     candidate_forms = reactive.Value([])
     pending_datamuse_request = reactive.Value(None)
+    manual_terms_state = reactive.Value([])
 
     def clean_terms_from_text(lines: str) -> list[str]:
-        terms = [
-            line.strip()
-            for line in lines.splitlines()
-            if line.strip()
-        ]
-        return clean_lower_terms(terms)
+        return clean_lower_terms(parse_manual_words(lines))
 
     def selected_candidate_forms() -> list[str]:
+        if not candidate_forms():
+            return []
+
         try:
             selected = input_.infl_selected_forms()
-        except AttributeError:
+        except (AttributeError, SilentException):
             return []
 
         if selected is None:
@@ -290,10 +305,11 @@ def inflections_explorer_server(input_, output, session, _shared):
 
         return list(selected)
 
-    def selected_terms_for_fetch() -> list[str]:
-        manual_terms = clean_terms_from_text(input_.infl_manual_terms() or "")
+    def selected_terms_for_fetch(manual_text: str | None = None) -> list[str]:
+        manual_terms = clean_terms_from_text(manual_text) if manual_text is not None else manual_terms_state()
         file_terms = []
         file_info = input_.infl_terms_file()
+        base_terms = clean_terms_from_text(input_.infl_base_word() or "")
 
         if file_info:
             path = file_info[0]["datapath"]
@@ -304,7 +320,59 @@ def inflections_explorer_server(input_, output, session, _shared):
             elif name.endswith((".xlsx", ".xls")):
                 file_terms.extend(read_lower_terms_from_excel(path))
 
-        return clean_lower_terms(manual_terms + file_terms + selected_candidate_forms())
+        selected_terms = selected_candidate_forms()
+
+        if not manual_terms and not file_terms and not selected_terms:
+            return clean_lower_terms(base_terms)
+
+        return clean_lower_terms(manual_terms + file_terms + selected_terms)
+
+    def fetch_ngram_data_for_terms(manual_text: str | None = None):
+        terms = selected_terms_for_fetch(manual_text)
+
+        if not terms:
+            ngram_data.set(pd.DataFrame({"error": ["Add at least one manual form or select a Datamuse candidate."]}))
+            return
+
+        if len(terms) > 12:
+            ngram_data.set(pd.DataFrame({"error": ["Use max 12 forms at once."]}))
+            return
+
+        try:
+            year_start = int(input_.infl_year_start())
+            year_end = int(input_.infl_year_end())
+        except (TypeError, ValueError):
+            ngram_data.set(pd.DataFrame({"error": ["Start year and end year must be valid numbers."]}))
+            return
+
+        year_start, year_end, _ = normalize_ngram_year_range(year_start, year_end)
+
+        try:
+            ui.update_numeric("infl_year_start", value=year_start)
+            ui.update_numeric("infl_year_end", value=year_end)
+        except Exception:
+            pass
+
+        if year_start > year_end:
+            ngram_data.set(pd.DataFrame({"error": ["Start year cannot be greater than end year."]}))
+            return
+
+        try:
+            df = fetch_google_ngram_pmw(
+                terms=terms,
+                year_start=year_start,
+                year_end=year_end,
+                corpus=input_.infl_corpus(),
+                smoothing=int(input_.infl_smoothing()),
+            )
+        except Exception as exc:
+            ngram_data.set(pd.DataFrame({"error": [f"Could not fetch Google Ngram data: {exc}"]}))
+            return
+
+        if df.empty:
+            ngram_data.set(pd.DataFrame({"error": ["No data returned from Google Ngram."]}))
+        else:
+            ngram_data.set(df)
 
     def build_wide_df() -> pd.DataFrame:
         return build_ngram_wide_df(ngram_data())
@@ -325,7 +393,8 @@ def inflections_explorer_server(input_, output, session, _shared):
             ),
             xaxis_title="Year",
             yaxis_title=yaxis_title,
-            height=600,
+            autosize=True,
+            height=640,
             hovermode="x unified",
             margin=dict(l=84, r=44, t=92, b=116),
             font=dict(size=18),
@@ -365,6 +434,7 @@ def inflections_explorer_server(input_, output, session, _shared):
             font=dict(size=16),
         )
         fig.update_layout(
+            autosize=True,
             height=460,
             margin=dict(l=40, r=30, t=50, b=40),
             xaxis=dict(visible=False),
@@ -431,34 +501,30 @@ def inflections_explorer_server(input_, output, session, _shared):
         )
 
     @reactive.effect
-    @reactive.event(input_.infl_fetch)
-    def _fetch_data():
-        terms = selected_terms_for_fetch()
+    def _sync_manual_terms():
+        manual_terms_state.set(clean_terms_from_text(input_.infl_manual_terms() or ""))
+
+    @output
+    @render.ui
+    def infl_manual_terms_preview():
+        terms = manual_terms_state()
 
         if not terms:
-            ngram_data.set(pd.DataFrame({"error": ["Add at least one manual form or select a Datamuse candidate."]}))
-            return
+            return ui.p("No manual forms detected yet.", class_="muted inflections-manual-detected")
 
-        if len(terms) > 12:
-            ngram_data.set(pd.DataFrame({"error": ["Use max 12 forms at once."]}))
-            return
+        sample = ", ".join(terms[:8])
+        more = "" if len(terms) <= 8 else f" (+{len(terms) - 8} more)"
 
-        try:
-            df = fetch_google_ngram_pmw(
-                terms=terms,
-                year_start=int(input_.infl_year_start()),
-                year_end=int(input_.infl_year_end()),
-                corpus=input_.infl_corpus(),
-                smoothing=int(input_.infl_smoothing()),
-            )
-        except Exception as exc:
-            ngram_data.set(pd.DataFrame({"error": [f"Could not fetch Google Ngram data: {exc}"]}))
-            return
+        return ui.p(
+            f"Manual forms detected: {sample}{more}",
+            class_="muted inflections-manual-detected",
+        )
 
-        if df.empty:
-            ngram_data.set(pd.DataFrame({"error": ["No data returned from Google Ngram."]}))
-        else:
-            ngram_data.set(df)
+    @reactive.effect
+    @reactive.event(input_.infl_fetch)
+    def _fetch_data():
+        manual_text = input_.infl_manual_terms() or ""
+        fetch_ngram_data_for_terms(manual_text)
 
     @reactive.effect
     @reactive.event(input_.client_api_response)

@@ -437,9 +437,10 @@ def compute_timeseries_tables(
 
 def cross_corpus_ui():
     return ui.div(
-        ui.div("Cross-Corpus Analysis", class_="page-title"),
+        ui.div("Cross-Corpora Comparisons", class_="page-title"),
         ui.p(
-            "Compare word trajectories across uploaded datasets, compute AUC, test AUC differences, and examine correlations.",
+            "Compare word trajectories across uploaded datasets, compute AUC, test AUC differences, and examine correlations. "
+            "Use this tab after downloading or preparing frequency tables from different corpora; upload one Excel file per corpus, then run the comparison on shared years.",
             class_="muted"
         ),
 
@@ -449,11 +450,12 @@ def cross_corpus_ui():
                 ui.h3("New here? How this tab works"),
                 ui.p("What this tab does: it compares multiple uploaded corpus files on shared years and computes advanced cross-corpus statistics."),
                 ui.p("Main options: number of files, dataset names, uploaded Excel files, exclusion of zero years, and selected year range."),
-                ui.p("Step 1: choose Number of files, then provide a name and upload one Excel file for each dataset."),
-                ui.p("Step 2: click Run analysis to build all result tables (AUC, correlations, tests, timeseries)."),
-                ui.p("Step 3: choose a word and adjust Year range to inspect per-word trajectories and AUC boxes."),
-                ui.p("Step 4: use Timeseries per word and Timeseries summary to compare how strongly corpora co-move over time."),
-                ui.p("Step 5: enable Exclude zero years when zeros should not be treated as meaningful values."),
+                ui.p("Step 1: download or prepare one word-by-year table for each corpus you want to compare, for example Google Ngram corpora, COHA, or another corpus source."),
+                ui.p("Step 2: choose Number of files, then provide a name and upload one Excel file for each dataset."),
+                ui.p("Step 3: click Run analysis to build all result tables (AUC, correlations, tests, timeseries)."),
+                ui.p("Step 4: choose a word and adjust Year range to inspect per-word trajectories and AUC boxes."),
+                ui.p("Step 5: use Timeseries per word and Timeseries summary to compare how strongly corpora co-move over time."),
+                ui.p("Step 6: enable Exclude zero years when zeros should not be treated as meaningful values."),
                 ui.h4("Required data format for uploaded files", class_="tab-guide-subtitle"),
                 ui.p(
                     "Each uploaded Excel file should contain words in the first column. "

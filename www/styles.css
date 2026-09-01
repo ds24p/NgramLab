@@ -231,6 +231,28 @@ body {
     padding: 8px 6px;
 }
 
+.dropdown-card .related-papers-button {
+    display: block;
+    width: 100%;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+    color: #6b7280;
+    font-family: Inter, Arial, sans-serif;
+    font-weight: 700;
+    text-align: left;
+    padding: 8px 6px;
+    border-radius: 10px;
+}
+
+.dropdown-card .related-papers-button:hover,
+.dropdown-card .related-papers-button:focus {
+    background: var(--violet-soft);
+    color: var(--violet-dark);
+    box-shadow: none;
+}
+
 .uni-logo {
     height: 78px;
     width: auto;
@@ -737,6 +759,28 @@ body {
     margin-bottom: 0;
 }
 
+.related-papers-intro {
+    margin-bottom: 0;
+}
+
+.related-papers-list {
+    list-style: none;
+    padding-left: 0 !important;
+}
+
+.related-papers-list li {
+    margin-bottom: 14px;
+}
+
+.related-papers-list li:last-child {
+    margin-bottom: 0;
+}
+
+.related-paper-note {
+    margin: 6px 0 0 0;
+    color: var(--muted) !important;
+}
+
 .modal-footer .btn {
     border-radius: 999px;
     font-family: Inter, Arial, sans-serif;
@@ -842,6 +886,26 @@ body {
     margin-bottom: 0 !important;
 }
 
+.explorer-data-notice {
+    margin: 0 0 14px 0;
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+.explorer-data-notice-warning {
+    border: 1px solid #f3d08a;
+    background: #fff8e6;
+    color: #704800;
+}
+
+.explorer-data-notice-ready {
+    border: 1px solid #c7d2fe;
+    background: #eef2ff;
+    color: #27346d;
+}
+
 .run-analysis-button,
 #download_explorer_excel {
     border-radius: 8px !important;
@@ -856,6 +920,47 @@ body {
     background: #7c3aed !important;
     border-color: #7c3aed !important;
     color: white !important;
+}
+
+.run-analysis-button:disabled {
+    background: #a7a3b8 !important;
+    border-color: #a7a3b8 !important;
+    cursor: not-allowed;
+}
+
+.run-analysis-button.is-loading {
+    opacity: 0.78;
+    cursor: progress;
+}
+
+.explorer-loading-state {
+    display: none;
+    align-items: center;
+    gap: 9px;
+    margin: 2px 0 10px 0;
+    color: #4c1d95;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.explorer-loading-state.is-visible {
+    display: inline-flex;
+}
+
+.explorer-loading-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid #d8c8ff;
+    border-top-color: #7c3aed;
+    border-radius: 50%;
+    animation: explorer-loading-spin 0.75s linear infinite;
+    flex: 0 0 auto;
+}
+
+@keyframes explorer-loading-spin {
+    to {
+        transform: rotate(360deg);
+    }
 }
 
 #download_explorer_excel {
@@ -922,7 +1027,7 @@ body {
     padding: 14px 2px 10px 2px;
 }
 
-.explorer-page .explorer-plot-scroll {
+.explorer-page .explorer-chart-section .explorer-plot-scroll {
     width: calc(100% + 48px);
     max-width: none;
     margin-left: -24px;
@@ -933,7 +1038,8 @@ body {
 
 .explorer-plot-inner {
     width: 100%;
-    min-width: min(1100px, 100%);
+    min-width: 100%;
+    max-width: none;
     display: block;
 }
 
@@ -952,22 +1058,70 @@ body {
     margin: 0 auto;
 }
 
-.explorer-plot-inner .html-widget,
-.explorer-plot-inner .shiny-ipywidget-output,
-.explorer-plot-inner .html-fill-item,
-.explorer-plot-inner .html-fill-container,
-.explorer-plot-inner .plotly,
-.explorer-plot-inner .js-plotly-plot,
-.explorer-plot-inner .plot-container,
-.explorer-plot-inner .svg-container {
+.heatmap-section .centered-plot-container {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    padding-left: 0;
+    padding-right: 0;
+}
+
+.heatmap-section .explorer-heatmap-inner {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.explorer-chart-section .explorer-plot-inner .html-widget,
+.explorer-chart-section .explorer-plot-inner .shiny-ipywidget-output,
+.explorer-chart-section .explorer-plot-inner .html-fill-item,
+.explorer-chart-section .explorer-plot-inner .html-fill-container,
+.explorer-chart-section .explorer-plot-inner .plotly,
+.explorer-chart-section .explorer-plot-inner .js-plotly-plot,
+.explorer-chart-section .explorer-plot-inner .plot-container,
+.explorer-chart-section .explorer-plot-inner .svg-container {
     display: block !important;
     width: 100% !important;
     min-width: 100% !important;
     max-width: none !important;
 }
 
-.explorer-plot-inner .main-svg {
+.explorer-chart-section .explorer-plot-inner .main-svg {
     width: 100% !important;
+}
+
+.heatmap-section .centered-plot-container {
+    text-align: center;
+}
+
+.heatmap-section .explorer-heatmap-inner {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    margin-left: auto;
+    margin-right: auto;
+    text-align: left;
+}
+
+.heatmap-section #correlation_heatmap {
+    display: flex !important;
+    justify-content: center;
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    overflow-x: auto;
+}
+
+.heatmap-section #correlation_heatmap .js-plotly-plot,
+.heatmap-section #correlation_heatmap .plot-container,
+.heatmap-section #correlation_heatmap .svg-container,
+.heatmap-section #correlation_heatmap .main-svg {
+    flex: 0 0 auto;
+    margin-left: auto !important;
+    margin-right: auto !important;
 }
 
 .segmented-filter-controls {
@@ -1506,16 +1660,30 @@ body {
 }
 
 .inflections-plot-container {
-    width: 100%;
-    max-width: 100%;
+    width: calc(100% + 48px);
+    max-width: none;
+    margin-left: -24px;
+    margin-right: -24px;
     overflow-x: auto;
     overflow-y: visible;
-    padding-top: 12px;
+    padding: 12px 0 4px 0;
 }
 
 .inflections-plot-container .html-widget,
+.inflections-plot-container .shiny-ipywidget-output,
+.inflections-plot-container .html-fill-item,
+.inflections-plot-container .html-fill-container,
 .inflections-plot-container .plotly,
-.inflections-plot-container .js-plotly-plot {
+.inflections-plot-container .js-plotly-plot,
+.inflections-plot-container .plot-container,
+.inflections-plot-container .svg-container {
+    display: block !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: none !important;
+}
+
+.inflections-plot-container .main-svg {
     width: 100% !important;
 }
 
@@ -1729,16 +1897,30 @@ body {
 }
 
 .synonyms-plot-container {
-    width: 100%;
-    max-width: 100%;
+    width: calc(100% + 48px);
+    max-width: none;
+    margin-left: -24px;
+    margin-right: -24px;
     overflow-x: auto;
     overflow-y: visible;
-    padding-top: 12px;
+    padding: 12px 0 4px 0;
 }
 
 .synonyms-plot-container .html-widget,
+.synonyms-plot-container .shiny-ipywidget-output,
+.synonyms-plot-container .html-fill-item,
+.synonyms-plot-container .html-fill-container,
 .synonyms-plot-container .plotly,
-.synonyms-plot-container .js-plotly-plot {
+.synonyms-plot-container .js-plotly-plot,
+.synonyms-plot-container .plot-container,
+.synonyms-plot-container .svg-container {
+    display: block !important;
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: none !important;
+}
+
+.synonyms-plot-container .main-svg {
     width: 100% !important;
 }
 

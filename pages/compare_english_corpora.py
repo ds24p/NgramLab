@@ -6,11 +6,16 @@ import plotly.graph_objects as go
 from shinywidgets import output_widget, render_widget
 
 from utils import (
+    GOOGLE_NGRAM_YEAR_MAX,
+    GOOGLE_NGRAM_YEAR_MIN,
     auc_trapezoid,
     fetch_ngram_timeseries,
+    normalize_ngram_year_range,
     parse_manual_words,
     safe_corr,
     slope_per_year,
+    truncate_display_dataframe,
+    truncate_display_text,
     trend_label,
 )
 
@@ -21,6 +26,9 @@ ENGLISH_CORPORA = {
     "28": "British English 2019",
     "29": "English Fiction 2019",
 }
+MAX_COMPARE_SERIES = 60
+MAX_COMPARE_WORDS = 20
+MAX_COMPARE_DATA_POINTS = 40_000
 
 def safe_peak_year(years, values):
     values = np.asarray(values, dtype=float)
@@ -40,10 +48,11 @@ def safe_ratio(a, b):
 
 def get_compare_english_corpora_ui():
     return ui.div(
-        ui.div("Compare English Corpora", class_="page-title"),
+        ui.div("Within Google Ngram Corpora", class_="page-title"),
 
         ui.p(
-            "Compare selected English Google Ngram corpora. "
+            "Compare the same word list within Google Ngram Viewer corpora: English, American English, British English, and English Fiction. "
+            "Use this tab for corpus variants provided by Google Ngram; use Cross-Corpora Comparisons for your own uploaded datasets. "
             "Values are converted from raw relative frequencies to per million words (PMW).",
             class_="muted compare-corpora-intro"
         ),
@@ -52,7 +61,7 @@ def get_compare_english_corpora_ui():
             "input.user_mode === 'New here'",
             ui.div(
                 ui.h3("New here? How this tab works"),
-                ui.p("What this tab does: it compares the same words across English, American, British, and Fiction corpora."),
+                ui.p("What this tab does: it compares the same words within Google Ngram Viewer corpora: English, American English, British English, and Fiction."),
                 ui.p("Main options: word list, selected corpora, year range, and Google smoothing parameter."),
                 ui.p("Step 1: paste words (one per line) and select the corpora you want to compare."),
                 ui.p("Step 2: set Start year and End year, then optionally increase smoothing for less noisy curves."),
@@ -72,11 +81,16 @@ def get_compare_english_corpora_ui():
                         placeholder="Type one word per line",
                         rows=7
                     ),
+                    ui.p(
+                        f"Limit: up to {MAX_COMPARE_WORDS} words and max {MAX_COMPARE_SERIES} word-corpus lines per comparison. "
+                        "For example, with 4 corpora selected, use up to 15 words.",
+                        class_="muted explorer-control-note",
+                    ),
 
                     ui.div(
                         ui.input_checkbox_group(
                             "selected_corpora",
-                            "Select English corpora",
+                            "Select Google Ngram corpora",
                             choices=ENGLISH_CORPORA,
                             selected=list(ENGLISH_CORPORA.keys())
                         ),
@@ -87,16 +101,16 @@ def get_compare_english_corpora_ui():
                         "compare_year_start",
                         "Start year",
                         value=1901,
-                        min=1500,
-                        max=2019
+                        min=GOOGLE_NGRAM_YEAR_MIN,
+                        max=GOOGLE_NGRAM_YEAR_MAX
                     ),
 
                     ui.input_numeric(
                         "compare_year_end",
                         "End year",
-                        value=2000,
-                        min=1500,
-                        max=2019
+                        value=GOOGLE_NGRAM_YEAR_MAX,
+                        min=GOOGLE_NGRAM_YEAR_MIN,
+                        max=GOOGLE_NGRAM_YEAR_MAX
                     ),
 
                     ui.input_numeric(
@@ -105,6 +119,11 @@ def get_compare_english_corpora_ui():
                         value=0,
                         min=0,
                         max=50
+                    ),
+                    ui.p(
+                        f"Use English terms and years {GOOGLE_NGRAM_YEAR_MIN}-"
+                        f"{GOOGLE_NGRAM_YEAR_MAX}. Out-of-range years are adjusted automatically.",
+                        class_="muted explorer-control-note",
                     ),
 
                     ui.input_action_button(
@@ -146,7 +165,7 @@ def get_compare_english_corpora_ui():
                 ui.div(
                     ui.h3("Summary Answers", class_="table-section-title"),
                     ui.p(
-                        "Interpretive comparisons of American, British, Fiction, and general English trajectories.",
+                        "Interpretive comparisons of American English, British English, Fiction, and general English trajectories.",
                         class_="muted section-description",
                     ),
                     ui.output_data_frame("english_corpus_summary"),
@@ -156,7 +175,7 @@ def get_compare_english_corpora_ui():
                 ui.div(
                     ui.h3("AUC Comparison", class_="table-section-title"),
                     ui.p(
-                        "AUC totals and directional differences between selected English corpora.",
+                        "AUC totals and directional differences between selected Google Ngram corpora. AUC is the total frequency volume across the selected years.",
                         class_="muted section-description",
                     ),
                     ui.output_data_frame("english_corpus_auc"),
@@ -187,7 +206,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
 
     status_text = reactive.Value("No comparison run yet.")
 
-    def finish_comparison(words, selected_corpora, year_start, year_end, years, yearly_df):
+    def finish_comparison(words, selected_corpora, year_start, year_end, years, yearly_df, year_note=""):
         selected_corpus_names = set(selected_corpora.values())
 
         series_by_word_corpus = {
@@ -326,7 +345,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
 
         status_text.set(
             f"Comparison complete. Downloaded {len(words)} words for "
-            f"{year_start}-{year_end}. Values are per million words (PMW)."
+            f"{year_start}-{year_end}. Values are per million words (PMW).{year_note}"
         )
 
     @reactive.effect
@@ -338,7 +357,14 @@ def get_compare_english_corpora_server(input, output, session, shared):
             status_text.set("No words provided.")
             return
 
-        selected_ids = list(input.selected_corpora())
+        if len(words) > MAX_COMPARE_WORDS:
+            status_text.set(
+                f"Please enter up to {MAX_COMPARE_WORDS} terms for cross-corpus visualization."
+            )
+            return
+
+        selected_raw = input.selected_corpora()
+        selected_ids = list(selected_raw) if selected_raw else []
 
         if not selected_ids:
             status_text.set("Select at least one corpus.")
@@ -350,8 +376,23 @@ def get_compare_english_corpora_server(input, output, session, shared):
             if cid in ENGLISH_CORPORA
         }
 
-        year_start = int(input.compare_year_start())
-        year_end = int(input.compare_year_end())
+        try:
+            year_start = int(input.compare_year_start())
+            year_end = int(input.compare_year_end())
+        except (TypeError, ValueError):
+            status_text.set("Start year and end year must be valid numbers.")
+            return
+
+        year_start, year_end, years_adjusted = normalize_ngram_year_range(
+            year_start,
+            year_end,
+        )
+
+        try:
+            ui.update_numeric("compare_year_start", value=year_start)
+            ui.update_numeric("compare_year_end", value=year_end)
+        except Exception:
+            pass
 
         if year_start > year_end:
             status_text.set("Start year cannot be greater than end year.")
@@ -360,11 +401,35 @@ def get_compare_english_corpora_server(input, output, session, shared):
         smoothing = int(input.compare_smoothing())
         years = list(range(year_start, year_end + 1))
         expected_len = len(years)
+        series_count = len(words) * len(selected_corpora)
+        requested_points = series_count * expected_len
         yearly_rows = []
+        year_note = (
+            f" Year range was adjusted to the Google Ngram range "
+            f"{GOOGLE_NGRAM_YEAR_MIN}-{GOOGLE_NGRAM_YEAR_MAX}."
+            if years_adjusted
+            else ""
+        )
+
+        if series_count > MAX_COMPARE_SERIES:
+            max_words = max(1, MAX_COMPARE_SERIES // len(selected_corpora))
+            status_text.set(
+                f"Request too large: {len(words)} words across {len(selected_corpora)} corpora "
+                f"would create {series_count} plot lines and Google requests. "
+                f"Use max {max_words} words with the current corpus selection, or select fewer corpora."
+            )
+            return
+
+        if requested_points > MAX_COMPARE_DATA_POINTS:
+            status_text.set(
+                f"Request too large: {series_count} word-corpus lines x {expected_len} years "
+                f"= {requested_points:,} values. Use max {MAX_COMPARE_DATA_POINTS:,} values per comparison."
+            )
+            return
 
         status_text.set(
             f"Downloading Google Ngram data for {len(words)} words "
-            f"across {len(selected_corpora)} selected English corpora..."
+            f"across {len(selected_corpora)} selected English corpora...{year_note}"
         )
 
         for word in words:
@@ -411,7 +476,15 @@ def get_compare_english_corpora_server(input, output, session, shared):
                     })
 
         yearly_df = pd.DataFrame(yearly_rows)
-        finish_comparison(words, selected_corpora, year_start, year_end, years, yearly_df)
+        finish_comparison(
+            words,
+            selected_corpora,
+            year_start,
+            year_end,
+            years,
+            yearly_df,
+            year_note=year_note,
+        )
 
     @output
     @render.text
@@ -448,6 +521,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
 
         for word in df["word"].dropna().unique():
             sub_word = df[df["word"] == word]
+            display_word = truncate_display_text(word, max_chars=40)
 
             for corpus in sub_word["corpus"].dropna().unique():
                 sub = sub_word[sub_word["corpus"] == corpus].sort_values("year")
@@ -457,7 +531,7 @@ def get_compare_english_corpora_server(input, output, session, shared):
                         x=sub["year"],
                         y=sub["pmw"],
                         mode="lines+markers",
-                        name=f"{word} - {corpus}",
+                        name=f"{display_word} - {corpus}",
                         marker=dict(size=5),
                         hovertemplate=(
                             "Word: "
@@ -522,8 +596,10 @@ def get_compare_english_corpora_server(input, output, session, shared):
                 filters=False
             )
 
+        display_df = truncate_display_dataframe(df, columns=["word"])
+
         return render.DataGrid(
-            df,
+            display_df,
             filters=False,
             height="500px",
             width="100%",
@@ -542,8 +618,10 @@ def get_compare_english_corpora_server(input, output, session, shared):
                 filters=False
             )
 
+        display_df = truncate_display_dataframe(df, columns=["word"])
+
         return render.DataGrid(
-            df,
+            display_df,
             filters=False,
             height="400px",
             width="100%",
@@ -562,8 +640,10 @@ def get_compare_english_corpora_server(input, output, session, shared):
                 filters=False
             )
 
+        display_df = truncate_display_dataframe(df, columns=["word"])
+
         return render.DataGrid(
-            df,
+            display_df,
             filters=False,
             height="500px",
             width="100%",
@@ -592,7 +672,8 @@ def get_compare_english_corpora_server(input, output, session, shared):
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
             path = tmp.name
 
-        selected_ids = list(input.selected_corpora())
+        selected_raw = input.selected_corpora()
+        selected_ids = list(selected_raw) if selected_raw else []
 
         selected_corpora = {
             cid: ENGLISH_CORPORA[cid]

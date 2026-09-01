@@ -1,0 +1,18 @@
+services:
+  ngram-lab:
+    build:
+      context: .
+    image: ngram-lab:latest
+    container_name: ngram-lab
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:8000:8000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

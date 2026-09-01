@@ -21,7 +21,25 @@ if pyodide_http is not None:
 PMW_MULTIPLIER = 1_000_000
 PMW_LABEL = "per million words (PMW)"
 GOOGLE_NGRAM_JSON_URL = "https://books.google.com/ngrams/json"
+GOOGLE_NGRAM_YEAR_MIN = 1800
+GOOGLE_NGRAM_YEAR_MAX = 2019
+DISPLAY_TEXT_MAX_CHARS = 50
+MAX_TERM_INPUT_CHARS = 200
 
+CORPUS_RANGES = {
+    "26": (1800, 2019),       # English 2019
+    "27": (1800, 2019),       # American English 2019
+    "28": (1800, 2019),       # British English 2019
+    "29": (1800, 2019),       # English Fiction 2019
+    "31": (1800, 2019),       # German 2019
+    "33": (1800, 2019),       # Italian 2019
+}
+
+def get_corpus_year_range(corpus: str) -> tuple[int, int]:
+    return CORPUS_RANGES.get(
+        str(corpus),
+        (GOOGLE_NGRAM_YEAR_MIN, GOOGLE_NGRAM_YEAR_MAX),
+    )
 
 def year_columns(df: pd.DataFrame) -> list[int]:
     years = []
@@ -154,6 +172,65 @@ def round_numeric_df(df: pd.DataFrame, digits: int = 2) -> pd.DataFrame:
     out = df.copy()
     numeric_cols = out.select_dtypes(include=[np.number]).columns
     out[numeric_cols] = out[numeric_cols].round(digits)
+    return out
+
+
+def normalize_ngram_year_range(year_start: int, year_end: int) -> tuple[int, int, bool]:
+    original_start = int(year_start)
+    original_end = int(year_end)
+
+    start = (
+        original_start
+        if GOOGLE_NGRAM_YEAR_MIN <= original_start <= GOOGLE_NGRAM_YEAR_MAX
+        else GOOGLE_NGRAM_YEAR_MIN
+    )
+    end = (
+        original_end
+        if GOOGLE_NGRAM_YEAR_MIN <= original_end <= GOOGLE_NGRAM_YEAR_MAX
+        else GOOGLE_NGRAM_YEAR_MAX
+    )
+
+    if start > end:
+        start = GOOGLE_NGRAM_YEAR_MIN
+        end = GOOGLE_NGRAM_YEAR_MAX
+
+    return start, end, start != original_start or end != original_end
+
+
+def truncate_display_text(value, max_chars: int = DISPLAY_TEXT_MAX_CHARS):
+    try:
+        if pd.isna(value):
+            return value
+    except (TypeError, ValueError):
+        pass
+
+    text = str(value)
+
+    if len(text) <= max_chars:
+        return text
+
+    if max_chars <= 3:
+        return text[:max_chars]
+
+    return f"{text[:max_chars - 3]}..."
+
+
+def truncate_display_dataframe(
+    df: pd.DataFrame,
+    columns: list[str] | tuple[str, ...],
+    max_chars: int = DISPLAY_TEXT_MAX_CHARS,
+) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    out = df.copy()
+
+    for column in columns:
+        if column in out.columns:
+            out[column] = out[column].map(
+                lambda value: truncate_display_text(value, max_chars=max_chars)
+            )
+
     return out
 
 
@@ -343,10 +420,21 @@ def fetch_ngram_timeseries(
     case_insensitive: bool = False,
     timeout: int = 30,
 ):
+    min_year, max_year = get_corpus_year_range(str(corpus))
+
+    if not (
+        min_year <= year_start < year_end <= max_year
+    ):
+        raise ValueError(
+            f"Invalid year range {year_start}–{year_end}. "
+            f"Available years for corpus {corpus}: "
+            f"{min_year}–{max_year}."
+        )
+
     ts = _fetch_ngram_timeseries_cached(
         str(word),
-        int(year_start),
-        int(year_end),
+        year_start,
+        year_end,
         str(corpus),
         int(smoothing),
         bool(case_insensitive),
@@ -378,6 +466,7 @@ def _fetch_google_ngram_pmw_rows_cached(
     data = _read_json_url(url, timeout=timeout)
     years = list(range(year_start, year_end + 1))
     rows = []
+    seen_terms = set()
 
     for item in data:
         if not isinstance(item, dict):
@@ -389,8 +478,16 @@ def _fetch_google_ngram_pmw_rows_cached(
         if not term or not isinstance(values, list):
             continue
 
+        seen_terms.add(str(term).strip().lower())
+
         for year, value in zip(years, values):
             rows.append((term, year, round(float(value) * PMW_MULTIPLIER, 2)))
+
+    for term in terms:
+        term_key = str(term).strip().lower()
+
+        if term_key and term_key not in seen_terms:
+            rows.extend((term, year, 0.0) for year in years)
 
     return tuple(rows)
 
@@ -408,10 +505,15 @@ def fetch_google_ngram_pmw(
     if not clean:
         return pd.DataFrame()
 
+    year_start, year_end, _ = normalize_ngram_year_range(year_start, year_end)
+
+    if year_start > year_end:
+        return pd.DataFrame()
+
     rows = _fetch_google_ngram_pmw_rows_cached(
         clean,
-        int(year_start),
-        int(year_end),
+        year_start,
+        year_end,
         str(corpus),
         int(smoothing),
         int(timeout),
@@ -493,4 +595,3 @@ def parse_client_api_payload(payload) -> dict:
         return payload
 
     return {}
-
